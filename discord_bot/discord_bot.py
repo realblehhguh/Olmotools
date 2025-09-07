@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Discord bot that monitors W&B training runs and sends DM updates.
+Includes a health check endpoint for monitoring services like UptimeRobot.
 """
 
 import discord
@@ -13,6 +14,8 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 import glob
 from dotenv import load_dotenv
+from aiohttp import web
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +26,9 @@ DISCORD_USER_ID = int(os.getenv("DISCORD_USER_ID", "0"))
 WANDB_API_KEY = os.getenv("WANDB_API_KEY")
 WANDB_ENTITY = os.getenv("WANDB_ENTITY", "iamhappyandfree-personalcompany")
 WANDB_PROJECT = os.getenv("WANDB_PROJECT", "olmo-finetune-modal")
+
+# Health check port (Render will provide PORT environment variable)
+HEALTH_PORT = int(os.getenv("PORT", "8080"))
 
 # Initialize W&B
 if WANDB_API_KEY:
@@ -38,6 +44,90 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 # Track active runs
 active_runs: Dict[str, dict] = {}
 last_metrics: Dict[str, dict] = {}
+
+# Health check status
+bot_status = {
+    "status": "starting",
+    "last_check": datetime.now().isoformat(),
+    "discord_connected": False,
+    "active_runs": 0,
+    "uptime": 0,
+    "start_time": datetime.now()
+}
+
+
+class HealthCheckServer:
+    """Simple HTTP server for health checks."""
+    
+    def __init__(self, port=8080):
+        self.port = port
+        self.app = web.Application()
+        self.app.router.add_get('/', self.health_check)
+        self.app.router.add_get('/health', self.health_check)
+        self.app.router.add_get('/status', self.detailed_status)
+        self.runner = None
+    
+    async def health_check(self, request):
+        """Simple health check endpoint for UptimeRobot."""
+        global bot_status
+        
+        # Update status
+        bot_status["last_check"] = datetime.now().isoformat()
+        bot_status["uptime"] = (datetime.now() - bot_status["start_time"]).total_seconds()
+        bot_status["active_runs"] = len(active_runs)
+        
+        # Check if bot is healthy
+        if bot_status["discord_connected"] and bot_status["status"] == "running":
+            return web.Response(
+                text="OK - Discord bot is running",
+                status=200,
+                content_type='text/plain'
+            )
+        else:
+            return web.Response(
+                text=f"ERROR - Bot status: {bot_status['status']}",
+                status=503,
+                content_type='text/plain'
+            )
+    
+    async def detailed_status(self, request):
+        """Detailed status endpoint with JSON response."""
+        global bot_status
+        
+        # Update status
+        bot_status["last_check"] = datetime.now().isoformat()
+        bot_status["uptime"] = (datetime.now() - bot_status["start_time"]).total_seconds()
+        bot_status["active_runs"] = len(active_runs)
+        
+        # Build detailed response
+        response_data = {
+            "status": bot_status["status"],
+            "discord_connected": bot_status["discord_connected"],
+            "last_check": bot_status["last_check"],
+            "uptime_seconds": bot_status["uptime"],
+            "uptime_formatted": str(timedelta(seconds=int(bot_status["uptime"]))),
+            "active_training_runs": bot_status["active_runs"],
+            "runs": list(active_runs.keys()) if active_runs else [],
+            "wandb_project": f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+            "health": "healthy" if bot_status["discord_connected"] else "unhealthy"
+        }
+        
+        return web.json_response(response_data)
+    
+    async def start(self):
+        """Start the health check server."""
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, '0.0.0.0', self.port)
+        await site.start()
+        print(f"✅ Health check server running on port {self.port}")
+        print(f"   - Health endpoint: http://0.0.0.0:{self.port}/health")
+        print(f"   - Status endpoint: http://0.0.0.0:{self.port}/status")
+    
+    async def stop(self):
+        """Stop the health check server."""
+        if self.runner:
+            await self.runner.cleanup()
 
 
 class TrainingMonitor:
@@ -173,7 +263,11 @@ class TrainingMonitor:
 @bot.event
 async def on_ready():
     """Bot startup event."""
+    global bot_status
+    
     print(f'✅ {bot.user} has connected to Discord!')
+    bot_status["discord_connected"] = True
+    bot_status["status"] = "running"
     
     # Start monitoring task
     monitor_runs.start()
@@ -183,7 +277,16 @@ async def on_ready():
     if user:
         await user.send("🤖 **OLMo Training Bot Online!**\n"
                        "I'll monitor your W&B runs and send you updates.\n"
-                       "Commands: `/status`, `/metrics`, `/list`, `/stop`")
+                       "Commands: `/status`, `/metrics`, `/list`, `/stop`\n"
+                       f"Health check: http://localhost:{HEALTH_PORT}/health")
+
+
+@bot.event
+async def on_disconnect():
+    """Bot disconnect event."""
+    global bot_status
+    bot_status["discord_connected"] = False
+    bot_status["status"] = "disconnected"
 
 
 @tasks.loop(seconds=30)
@@ -407,8 +510,10 @@ async def stop_monitoring(ctx, run_name: str = None):
         await ctx.send(f"Run not found: {run_name}")
 
 
-def main():
-    """Main entry point for Discord bot."""
+async def main():
+    """Main entry point for Discord bot with health check server."""
+    global bot_status
+    
     if not DISCORD_TOKEN:
         print("❌ DISCORD_BOT_TOKEN not found in environment variables!")
         print("Please create a .env file with:")
@@ -421,9 +526,23 @@ def main():
         print("❌ DISCORD_USER_ID not found in environment variables!")
         return
     
-    print("🤖 Starting Discord bot...")
-    bot.run(DISCORD_TOKEN)
+    # Start health check server
+    health_server = HealthCheckServer(port=HEALTH_PORT)
+    await health_server.start()
+    
+    try:
+        # Start Discord bot
+        print("🤖 Starting Discord bot...")
+        await bot.start(DISCORD_TOKEN)
+    except KeyboardInterrupt:
+        print("\n⚠️  Shutting down...")
+    finally:
+        # Cleanup
+        bot_status["status"] = "stopping"
+        await health_server.stop()
+        await bot.close()
 
 
 if __name__ == "__main__":
-    main()
+    # Run the bot with health check server
+    asyncio.run(main())
