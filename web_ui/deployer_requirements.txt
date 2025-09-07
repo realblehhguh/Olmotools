@@ -1,7 +1,7 @@
 # Requirements for OLMo Training Deployer Web UI
 
 # Web Framework
-Flas
+Flask
 Flask-CORS
 
 # Modal SDK
