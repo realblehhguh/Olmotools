@@ -1,0 +1,95 @@
+# Render deployment configuration for OLMo Discord Bot
+# This file configures the Discord bot to run on Render's cloud platform
+
+services:
+  # Discord Bot Service
+  - type: worker
+    name: olmo-discord-bot
+    runtime: python
+    region: oregon # Options: oregon, ohio, virginia, frankfurt, singapore
+    plan: starter # Options: starter ($7/month), standard ($25/month)
+    
+    # Build configuration
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r bot_requirements.txt
+    
+    # Start command
+    startCommand: python discord_bot.py
+    
+    # Health check (worker services don't need HTTP health checks)
+    healthCheckPath: /
+    
+    # Environment variables (set these in Render dashboard)
+    envVars:
+      # Discord Configuration
+      - key: DISCORD_BOT_TOKEN
+        sync: false # Must be set manually in Render dashboard
+      
+      - key: DISCORD_USER_ID
+        sync: false # Must be set manually in Render dashboard
+      
+      # Weights & Biases Configuration
+      - key: WANDB_API_KEY
+        sync: false # Must be set manually in Render dashboard
+      
+      - key: WANDB_ENTITY
+        value: iamhappyandfree-personalcompany # Update with your entity
+      
+      - key: WANDB_PROJECT
+        value: olmo-finetune-modal
+      
+      # Python Configuration
+      - key: PYTHON_VERSION
+        value: "3.10"
+      
+      # Application Settings
+      - key: TZ
+        value: America/Los_Angeles
+      
+      - key: LOG_LEVEL
+        value: INFO
+    
+    # Auto-deploy settings
+    autoDeploy: true # Automatically deploy on git push
+    
+    # Scaling (for paid plans)
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+    
+    # Resources
+    # Note: These are automatically set based on the plan
+    # starter: 512MB RAM, 0.5 CPU
+    # standard: 2GB RAM, 1 CPU
+
+# Optional: Database for persistent storage
+databases:
+  - name: olmo-bot-db
+    plan: starter # Options: starter (free), standard ($7/month)
+    databaseName: olmo_bot
+    user: olmo_bot_user
+    
+    # Optional: Enable if you want to store training history
+    # You'd need to modify discord_bot.py to use a database
+    # instead of JSON files for deployment tracking
+
+# Optional: Persistent Disk for deployment files
+disks:
+  - name: olmo-deployments
+    mountPath: /opt/render/project/src/deployments
+    sizeGB: 1 # 1GB should be sufficient for deployment JSON files
+
+# Build configuration
+buildFilter:
+  paths:
+    - discord_bot.py
+    - bot_requirements.txt
+    - deployments/**
+  ignoredPaths:
+    - "*.md"
+    - ".git"
+    - "__pycache__"
+    - "*.pyc"
+    - ".env"
+    - ".env.local"
