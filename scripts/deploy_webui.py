@@ -382,17 +382,3 @@ for deployment on Render. It will:
     args = parser.parse_args()
     
     try:
-        # Modify git check behavior based on argument
-        if args.skip_git_check:
-            print("⚠️  Skipping git checks as requested")
-            # Override the check_git_status function to always return True
-            import types
-            check_git_status = lambda: True
-        
-        main()
-    except KeyboardInterrupt:
-        print("\n\n❌ Deployment setup cancelled by user.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Error during setup: {e}")
-        sys.exit(1)
