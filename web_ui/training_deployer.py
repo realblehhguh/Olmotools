@@ -61,6 +61,47 @@ def verify_api_key(api_key: str) -> bool:
     return api_key == DEPLOY_API_KEY
 
 
+def get_gpu_recommendations(use_case: str = "training") -> dict:
+    """Get GPU recommendations based on use case."""
+    recommendations = {
+        "training": {
+            "budget": {"type": "L4", "count": 1, "description": "Cost-effective for small models"},
+            "balanced": {"type": "A100", "count": 2, "description": "Good balance of performance and cost"},
+            "performance": {"type": "H100", "count": 4, "description": "High performance for large models"},
+            "maximum": {"type": "B200", "count": 8, "description": "Maximum performance for largest models"}
+        },
+        "inference": {
+            "budget": {"type": "T4", "count": 1, "description": "Basic inference workloads"},
+            "balanced": {"type": "L4", "count": 1, "description": "Good performance for most inference tasks"},
+            "performance": {"type": "A100", "count": 1, "description": "High-throughput inference"},
+            "maximum": {"type": "H100i", "count": 1, "description": "Optimized for inference workloads"}
+        },
+        "development": {
+            "budget": {"type": "T4", "count": 1, "description": "Development and testing"},
+            "balanced": {"type": "L4", "count": 1, "description": "Development with moderate compute needs"},
+            "performance": {"type": "A100", "count": 1, "description": "Development with heavy compute needs"}
+        }
+    }
+    return recommendations.get(use_case, recommendations["training"])
+
+
+def get_gpu_types():
+    """Get list of available GPU types."""
+    return [
+        {"value": "T4", "label": "T4 - Basic GPU (16GB)", "max_count": 8},
+        {"value": "L4", "label": "L4 - Mid-range GPU (48GB)", "max_count": 8},
+        {"value": "A10", "label": "A10 - Training GPU (24GB)", "max_count": 4},
+        {"value": "A100", "label": "A100 - High-end GPU (40GB)", "max_count": 8},
+        {"value": "A100-40GB", "label": "A100-40GB - High-end GPU (40GB)", "max_count": 8},
+        {"value": "A100-80GB", "label": "A100-80GB - High-end GPU (80GB)", "max_count": 8},
+        {"value": "L40S", "label": "L40S - High-end GPU", "max_count": 8},
+        {"value": "H100", "label": "H100 - Latest GPU (80GB)", "max_count": 8},
+        {"value": "H100i", "label": "H100i - Inference optimized (80GB)", "max_count": 8},
+        {"value": "H200", "label": "H200 - Flagship GPU (80GB+)", "max_count": 8},
+        {"value": "B200", "label": "B200 - Most powerful GPU (Blackwell)", "max_count": 8}
+    ]
+
+
 def run_deployment(deployment_id: str, config: Dict):
     """Run the deployment in a background thread."""
     try:
@@ -82,7 +123,9 @@ def run_deployment(deployment_id: str, config: Dict):
             use_lora=config.get('use_lora', True),
             use_4bit=config.get('use_4bit', False),
             train_sample_size=config.get('train_sample_size'),
-            run_name=config.get('run_name', f"web_deploy_{deployment_id[:8]}")
+            run_name=config.get('run_name', f"web_deploy_{deployment_id[:8]}"),
+            gpu_type=config.get('gpu_type', 'A100'),
+            gpu_count=config.get('gpu_count', 2)
         )
         
         # Update status on success
@@ -140,7 +183,9 @@ def deploy():
             'use_4bit': data.get('use_4bit', 'false').lower() == 'true',
             'train_sample_size': int(data.get('train_sample_size')) if data.get('train_sample_size') else None,
             'run_name': data.get('run_name', ''),
-            'preset': data.get('preset', 'custom')
+            'preset': data.get('preset', 'custom'),
+            'gpu_type': data.get('gpu_type', 'A100'),
+            'gpu_count': int(data.get('gpu_count', 2))
         }
         
         # Apply presets
@@ -256,6 +301,19 @@ def api_deployments():
 def health():
     """Health check endpoint for Render."""
     return jsonify({'status': 'healthy'}), 200
+
+
+@app.route('/api/gpu/recommendations')
+def api_gpu_recommendations():
+    """API endpoint for GPU recommendations."""
+    use_case = request.args.get('use_case', 'training')
+    return jsonify(get_gpu_recommendations(use_case))
+
+
+@app.route('/api/gpu/types')
+def api_gpu_types():
+    """API endpoint for available GPU types."""
+    return jsonify(get_gpu_types())
 
 
 @app.route('/logs/<deployment_id>')

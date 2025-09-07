@@ -171,6 +171,88 @@
             </div>
         </div>
 
+        <!-- GPU Configuration -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h3 class="text-lg font-medium mb-4 text-gray-700">
+                <i class="fas fa-microchip mr-2"></i>GPU Configuration
+            </h3>
+            
+            <!-- GPU Recommendations -->
+            <div class="mb-6">
+                <h4 class="text-sm font-medium text-gray-700 mb-3">Quick GPU Presets</h4>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <button type="button" onclick="setGPUPreset('budget')" 
+                        class="gpu-preset-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium py-2 px-3 rounded transition duration-300">
+                        <i class="fas fa-dollar-sign mr-1"></i>Budget
+                        <span class="block text-xs font-normal">L4:1</span>
+                    </button>
+                    <button type="button" onclick="setGPUPreset('balanced')" 
+                        class="gpu-preset-btn bg-green-500 hover:bg-green-600 text-white text-sm font-medium py-2 px-3 rounded transition duration-300">
+                        <i class="fas fa-balance-scale mr-1"></i>Balanced
+                        <span class="block text-xs font-normal">A100:2</span>
+                    </button>
+                    <button type="button" onclick="setGPUPreset('performance')" 
+                        class="gpu-preset-btn bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium py-2 px-3 rounded transition duration-300">
+                        <i class="fas fa-rocket mr-1"></i>Performance
+                        <span class="block text-xs font-normal">H100:4</span>
+                    </button>
+                    <button type="button" onclick="setGPUPreset('maximum')" 
+                        class="gpu-preset-btn bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2 px-3 rounded transition duration-300">
+                        <i class="fas fa-fire mr-1"></i>Maximum
+                        <span class="block text-xs font-normal">B200:8</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- GPU Type -->
+                <div>
+                    <label for="gpu_type" class="block text-sm font-medium text-gray-700 mb-2">
+                        GPU Type
+                    </label>
+                    <select id="gpu_type" name="gpu_type" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
+                        onchange="updateGPUCountLimit()">
+                        <option value="T4">T4 - Basic GPU (16GB)</option>
+                        <option value="L4">L4 - Mid-range GPU (48GB)</option>
+                        <option value="A10">A10 - Training GPU (24GB)</option>
+                        <option value="A100" selected>A100 - High-end GPU (40GB)</option>
+                        <option value="A100-40GB">A100-40GB - High-end GPU (40GB)</option>
+                        <option value="A100-80GB">A100-80GB - High-end GPU (80GB)</option>
+                        <option value="L40S">L40S - High-end GPU</option>
+                        <option value="H100">H100 - Latest GPU (80GB)</option>
+                        <option value="H100i">H100i - Inference optimized (80GB)</option>
+                        <option value="H200">H200 - Flagship GPU (80GB+)</option>
+                        <option value="B200">B200 - Most powerful GPU (Blackwell)</option>
+                    </select>
+                </div>
+
+                <!-- GPU Count -->
+                <div>
+                    <label for="gpu_count" class="block text-sm font-medium text-gray-700 mb-2">
+                        Number of GPUs: <span id="gpu_count_value" class="font-bold text-purple-600">2</span>
+                    </label>
+                    <input type="range" id="gpu_count" name="gpu_count" 
+                        min="1" max="8" value="2" 
+                        class="w-full"
+                        oninput="updateGPUCountDisplay()">
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>1</span>
+                        <span id="gpu_count_max">8</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GPU Info Display -->
+            <div id="gpu_info" class="mt-4 p-3 bg-gray-50 rounded-lg">
+                <div class="text-sm text-gray-600">
+                    <strong>Configuration:</strong> <span id="gpu_config_display">A100:2</span><br>
+                    <strong>Total GPU Memory:</strong> <span id="gpu_memory_display">~80GB</span><br>
+                    <strong>Use Case:</strong> <span id="gpu_use_case_display">Good balance of performance and cost</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Resource Information -->
         <div class="bg-gray-50 rounded-lg p-4 mb-6">
             <h3 class="text-sm font-medium text-gray-700 mb-2">
@@ -179,7 +261,7 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
                 <div>
                     <i class="fas fa-microchip mr-1"></i>
-                    <strong>GPUs:</strong> 2x NVIDIA A100
+                    <strong>GPUs:</strong> <span id="resource_gpu_display">2x NVIDIA A100</span>
                 </div>
                 <div>
                     <i class="fas fa-memory mr-1"></i>
@@ -214,6 +296,28 @@
 </div>
 
 <script>
+// GPU configuration data
+const gpuData = {
+    'T4': { memory: 16, maxCount: 8, description: 'Basic GPU for inference and light training' },
+    'L4': { memory: 48, maxCount: 8, description: 'Mid-range GPU with good price/performance' },
+    'A10': { memory: 24, maxCount: 4, description: 'Good for training, up to 4 GPUs' },
+    'A100': { memory: 40, maxCount: 8, description: 'High-end training GPU' },
+    'A100-40GB': { memory: 40, maxCount: 8, description: 'A100 with 40GB memory' },
+    'A100-80GB': { memory: 80, maxCount: 8, description: 'A100 with 80GB memory' },
+    'L40S': { memory: 48, maxCount: 8, description: 'High-end GPU for training' },
+    'H100': { memory: 80, maxCount: 8, description: 'Latest high-end GPU for training' },
+    'H100i': { memory: 80, maxCount: 8, description: 'H100 inference optimized' },
+    'H200': { memory: 80, maxCount: 8, description: 'Latest flagship GPU' },
+    'B200': { memory: 80, maxCount: 8, description: 'Most powerful GPU (Blackwell architecture)' }
+};
+
+const gpuRecommendations = {
+    'budget': { type: 'L4', count: 1, description: 'Cost-effective for small models' },
+    'balanced': { type: 'A100', count: 2, description: 'Good balance of performance and cost' },
+    'performance': { type: 'H100', count: 4, description: 'High performance for large models' },
+    'maximum': { type: 'B200', count: 8, description: 'Maximum performance for largest models' }
+};
+
 function setPreset(preset) {
     // Update hidden preset field
     document.getElementById('preset').value = preset;
@@ -241,6 +345,67 @@ function setPreset(preset) {
     });
     event.target.classList.add('ring-4', 'ring-opacity-50');
 }
+
+function setGPUPreset(preset) {
+    const config = gpuRecommendations[preset];
+    if (config) {
+        document.getElementById('gpu_type').value = config.type;
+        document.getElementById('gpu_count').value = config.count;
+        updateGPUCountLimit();
+        updateGPUDisplay();
+    }
+    
+    // Update button styles
+    document.querySelectorAll('.gpu-preset-btn').forEach(btn => {
+        btn.classList.remove('ring-4', 'ring-opacity-50');
+    });
+    event.target.classList.add('ring-4', 'ring-opacity-50');
+}
+
+function updateGPUCountLimit() {
+    const gpuType = document.getElementById('gpu_type').value;
+    const gpuCountSlider = document.getElementById('gpu_count');
+    const maxCountDisplay = document.getElementById('gpu_count_max');
+    
+    const maxCount = gpuData[gpuType]?.maxCount || 8;
+    gpuCountSlider.max = maxCount;
+    maxCountDisplay.textContent = maxCount;
+    
+    // Adjust current value if it exceeds the new maximum
+    if (parseInt(gpuCountSlider.value) > maxCount) {
+        gpuCountSlider.value = maxCount;
+    }
+    
+    updateGPUDisplay();
+}
+
+function updateGPUCountDisplay() {
+    const gpuCount = document.getElementById('gpu_count').value;
+    document.getElementById('gpu_count_value').textContent = gpuCount;
+    updateGPUDisplay();
+}
+
+function updateGPUDisplay() {
+    const gpuType = document.getElementById('gpu_type').value;
+    const gpuCount = parseInt(document.getElementById('gpu_count').value);
+    const gpuInfo = gpuData[gpuType];
+    
+    if (gpuInfo) {
+        const totalMemory = gpuInfo.memory * gpuCount;
+        const config = `${gpuType}:${gpuCount}`;
+        
+        document.getElementById('gpu_config_display').textContent = config;
+        document.getElementById('gpu_memory_display').textContent = `~${totalMemory}GB`;
+        document.getElementById('gpu_use_case_display').textContent = gpuInfo.description;
+        document.getElementById('resource_gpu_display').textContent = `${gpuCount}x NVIDIA ${gpuType}`;
+    }
+}
+
+// Initialize GPU display on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateGPUCountLimit();
+    updateGPUDisplay();
+});
 
 // Form submission handler
 document.getElementById('deploymentForm').addEventListener('submit', function(e) {

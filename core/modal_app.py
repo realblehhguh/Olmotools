@@ -21,7 +21,7 @@ image = (
         "apt-get install -y libopenmpi-dev openmpi-bin",
         "mkdir -p /root/app/configs",
     )
-    .pip_install_from_requirements("requirements.txt")
+    .pip_install_from_requirements("../requirements.txt")
     .run_commands(
         # Set CUDA environment variables for DeepSpeed
         "export CUDA_HOME=/usr/local/cuda",
@@ -44,8 +44,8 @@ image = (
     .add_local_file("train.py", "/root/app/train.py")
     .add_local_file("data_utils.py", "/root/app/data_utils.py")
     .add_local_file("model_utils.py", "/root/app/model_utils.py")
-    .add_local_file("configs/deepspeed_config.json", "/root/app/configs/deepspeed_config.json")
-    .add_local_file("configs/deepspeed_config_single_gpu.json", "/root/app/configs/deepspeed_config_single_gpu.json")
+    .add_local_file("../configs/deepspeed_config.json", "/root/app/configs/deepspeed_config.json")
+    .add_local_file("../configs/deepspeed_config_single_gpu.json", "/root/app/configs/deepspeed_config_single_gpu.json")
 )
 
 # Create volumes for model storage and checkpoints
@@ -57,24 +57,227 @@ MODEL_DIR = "/vol/models"
 DATASET_DIR = "/vol/datasets"
 OUTPUT_DIR = "/vol/outputs"
 
-# GPU configuration - using dual A100s for better performance
-gpu_config = "A100:2"  # Using 2x A100 GPUs for distributed training
+# GPU configuration - configurable GPU type and count
+def get_gpu_config(gpu_type: str = "A100", gpu_count: int = 2) -> str:
+    """
+    Get GPU configuration string for Modal.
+    
+    Available GPU types (as of Modal's latest documentation):
+    - T4: Basic GPU, good for inference and light training
+    - L4: Mid-range GPU with good price/performance, 48GB GPU RAM
+    - A10: Good for training, supports up to 4 GPUs, up to 96GB GPU RAM
+    - A100: High-end training GPU, supports up to 8 GPUs
+    - A100-40GB: A100 with 40GB memory
+    - A100-80GB: A100 with 80GB memory  
+    - L40S: High-end GPU for training, supports up to 8 GPUs
+    - H100: Latest high-end GPU for training, supports up to 8 GPUs
+    - H100i: H100 inference optimized (H100I), supports up to 8 GPUs
+    - H200: Latest flagship GPU, supports up to 8 GPUs
+    - B200: Most powerful GPU available (Blackwell architecture), supports up to 8 GPUs
+    
+    GPU Count Limits:
+    - A10: Maximum 4 GPUs per container (up to 96GB GPU RAM)
+    - All others (B200, H200, H100, A100, L4, T4, L40S): Maximum 8 GPUs per container (up to 1,536GB CPU RAM)
+    
+    Args:
+        gpu_type: Type of GPU to use
+        gpu_count: Number of GPUs (1-4 for A10, 1-8 for others)
+    
+    Returns:
+        GPU configuration string in format "TYPE:COUNT"
+    """
+    # Normalize GPU type (handle case variations)
+    gpu_type = gpu_type.upper()
+    
+    # Map common variations to official names
+    gpu_type_mapping = {
+        "H100I": "H100i",  # Handle case variation
+        "A100-40": "A100-40GB",
+        "A100-80": "A100-80GB",
+    }
+    gpu_type = gpu_type_mapping.get(gpu_type, gpu_type)
+    
+    # Valid GPU types
+    valid_gpu_types = {
+        "T4", "L4", "A10", "A100", "A100-40GB", "A100-80GB", 
+        "L40S", "H100", "H100i", "H200", "B200"
+    }
+    
+    if gpu_type not in valid_gpu_types:
+        raise ValueError(f"Invalid GPU type: {gpu_type}. Valid types: {', '.join(sorted(valid_gpu_types))}")
+    
+    # Validate GPU count based on type
+    if gpu_type == "A10":
+        if gpu_count > 4:
+            raise ValueError("A10 GPUs support maximum 4 GPUs per container (up to 96GB GPU RAM)")
+        elif gpu_count < 1:
+            raise ValueError("At least 1 GPU required")
+    else:
+        if gpu_count > 8:
+            raise ValueError(f"{gpu_type} GPUs support maximum 8 GPUs per container (up to 1,536GB CPU RAM)")
+        elif gpu_count < 1:
+            raise ValueError("At least 1 GPU required")
+    
+    return f"{gpu_type}:{gpu_count}"
 
 
-@app.function(
-    image=image,
-    gpu=gpu_config,
-    volumes={
-        MODEL_DIR: model_volume,
-        DATASET_DIR: dataset_volume,
-    },
-    timeout=86400,  # 24 hours timeout
-    memory=32768,  # 32GB RAM
-    secrets=[
-        modal.Secret.from_name("huggingface-token"),  # For accessing gated models
-        modal.Secret.from_name("wandb-secret"),  # For W&B logging
-    ],
-)
+def get_gpu_recommendations(use_case: str = "training") -> dict:
+    """
+    Get GPU recommendations based on use case.
+    
+    Args:
+        use_case: Either "training", "inference", or "development"
+    
+    Returns:
+        Dictionary with recommended GPU configurations
+    """
+    recommendations = {
+        "training": {
+            "budget": {"type": "L4", "count": 1, "description": "Cost-effective for small models"},
+            "balanced": {"type": "A100", "count": 2, "description": "Good balance of performance and cost"},
+            "performance": {"type": "H100", "count": 4, "description": "High performance for large models"},
+            "maximum": {"type": "B200", "count": 8, "description": "Maximum performance for largest models"}
+        },
+        "inference": {
+            "budget": {"type": "T4", "count": 1, "description": "Basic inference workloads"},
+            "balanced": {"type": "L4", "count": 1, "description": "Good performance for most inference tasks"},
+            "performance": {"type": "A100", "count": 1, "description": "High-throughput inference"},
+            "maximum": {"type": "H100i", "count": 1, "description": "Optimized for inference workloads"}
+        },
+        "development": {
+            "budget": {"type": "T4", "count": 1, "description": "Development and testing"},
+            "balanced": {"type": "L4", "count": 1, "description": "Development with moderate compute needs"},
+            "performance": {"type": "A100", "count": 1, "description": "Development with heavy compute needs"}
+        }
+    }
+    
+    return recommendations.get(use_case, recommendations["training"])
+
+
+def create_training_function(gpu_type: str = "A100", gpu_count: int = 2):
+    """
+    Create a training function with specific GPU configuration.
+    
+    Args:
+        gpu_type: Type of GPU to use
+        gpu_count: Number of GPUs to use
+    
+    Returns:
+        Modal function configured with the specified GPU settings
+    """
+    
+    @app.function(
+        image=image,
+        gpu=get_gpu_config(gpu_type, gpu_count),
+        volumes={
+            MODEL_DIR: model_volume,
+            DATASET_DIR: dataset_volume,
+        },
+        timeout=86400,  # 24 hours timeout
+        memory=32768,  # 32GB RAM
+        secrets=[
+            modal.Secret.from_name("huggingface-token"),  # For accessing gated models
+            modal.Secret.from_name("wandb-secret"),  # For W&B logging
+        ],
+    )
+    def train_olmo_model_impl(
+        model_name: str = "allenai/OLMo-2-1124-7B",
+        num_epochs: int = 3,
+        batch_size: int = 4,
+        learning_rate: float = 2e-5,
+        max_length: int = 2048,
+        use_lora: bool = True,
+        use_4bit: bool = False,
+        train_sample_size: int = None,
+        run_name: str = None,
+    ):
+        """Train OLMo model on Modal with DeepSpeed."""
+        
+        import sys
+        import torch
+        from huggingface_hub import login
+        
+        # Set CUDA_HOME for DeepSpeed
+        os.environ["CUDA_HOME"] = "/usr/local/cuda"
+        
+        # Add current directory to path
+        sys.path.append("/root/app")
+        
+        # Import our training modules
+        from train import train
+        
+        # Login to HuggingFace if token is available
+        if "HUGGINGFACE_TOKEN" in os.environ:
+            login(token=os.environ["HUGGINGFACE_TOKEN"])
+            print("Logged in to HuggingFace Hub")
+        
+        # Set up output directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = f"{OUTPUT_DIR}/run_{timestamp}"
+        if run_name:
+            output_dir = f"{OUTPUT_DIR}/{run_name}_{timestamp}"
+        
+        # Create output directory
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Log GPU information
+        print(f"GPU Configuration: {gpu_type}:{gpu_count}")
+        if torch.cuda.is_available():
+            print(f"GPU Available: {torch.cuda.get_device_name(0)}")
+            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            print(f"Number of GPUs: {torch.cuda.device_count()}")
+        
+        # Choose appropriate DeepSpeed config based on GPU count
+        if gpu_count == 1:
+            deepspeed_config_path = "/root/app/configs/deepspeed_config_single_gpu.json"
+        else:
+            deepspeed_config_path = "/root/app/configs/deepspeed_config.json"
+        
+        # Run training
+        print(f"Starting training with the following configuration:")
+        print(f"  Model: {model_name}")
+        print(f"  GPU Type: {gpu_type}")
+        print(f"  GPU Count: {gpu_count}")
+        print(f"  Epochs: {num_epochs}")
+        print(f"  Batch Size: {batch_size}")
+        print(f"  Learning Rate: {learning_rate}")
+        print(f"  Max Length: {max_length}")
+        print(f"  Use LoRA: {use_lora}")
+        print(f"  Use 4-bit: {use_4bit}")
+        print(f"  DeepSpeed Config: {deepspeed_config_path}")
+        print(f"  Output Directory: {output_dir}")
+        
+        # Call the training function
+        trainer, model, tokenizer = train(
+            model_name=model_name,
+            output_dir=output_dir,
+            num_train_epochs=num_epochs,
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
+            gradient_accumulation_steps=4,
+            learning_rate=learning_rate,
+            warmup_steps=500,
+            max_length=max_length,
+            use_lora=use_lora,
+            use_4bit=use_4bit,
+            use_deepspeed=True,
+            deepspeed_config_path=deepspeed_config_path,
+            train_sample_size=train_sample_size,
+            val_sample_size=500,
+            seed=42,
+            run_name=run_name,
+            wandb_project="olmo-finetune-modal"
+        )
+        
+        # Commit volumes to persist checkpoints
+        model_volume.commit()
+        
+        print(f"Training completed! Model saved to: {output_dir}")
+        return output_dir
+    
+    return train_olmo_model_impl
+
+
 def train_olmo_model(
     model_name: str = "allenai/OLMo-2-1124-7B",
     num_epochs: int = 3,
@@ -85,85 +288,39 @@ def train_olmo_model(
     use_4bit: bool = False,
     train_sample_size: int = None,
     run_name: str = None,
+    gpu_type: str = "A100",
+    gpu_count: int = 2,
 ):
-    """Train OLMo model on Modal with DeepSpeed."""
+    """
+    Train OLMo model on Modal with configurable GPU settings.
     
-    import sys
-    import torch
-    from huggingface_hub import login
+    This function creates a Modal function with the specified GPU configuration
+    and executes the training job.
+    """
+    # Validate GPU configuration
+    gpu_config = get_gpu_config(gpu_type, gpu_count)
+    print(f"Creating training function with GPU config: {gpu_config}")
     
-    # Set CUDA_HOME for DeepSpeed
-    os.environ["CUDA_HOME"] = "/usr/local/cuda"
+    # Create the training function with the specified GPU configuration
+    training_func = create_training_function(gpu_type, gpu_count)
     
-    # Add current directory to path
-    sys.path.append("/root/app")
-    
-    # Import our training modules
-    from .train import train
-    
-    # Login to HuggingFace if token is available
-    if "HUGGINGFACE_TOKEN" in os.environ:
-        login(token=os.environ["HUGGINGFACE_TOKEN"])
-        print("Logged in to HuggingFace Hub")
-    
-    # Set up output directory with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"{OUTPUT_DIR}/run_{timestamp}"
-    if run_name:
-        output_dir = f"{OUTPUT_DIR}/{run_name}_{timestamp}"
-    
-    # Create output directory
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Log GPU information
-    if torch.cuda.is_available():
-        print(f"GPU Available: {torch.cuda.get_device_name(0)}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        print(f"Number of GPUs: {torch.cuda.device_count()}")
-    
-    # Run training
-    print(f"Starting training with the following configuration:")
-    print(f"  Model: {model_name}")
-    print(f"  Epochs: {num_epochs}")
-    print(f"  Batch Size: {batch_size}")
-    print(f"  Learning Rate: {learning_rate}")
-    print(f"  Max Length: {max_length}")
-    print(f"  Use LoRA: {use_lora}")
-    print(f"  Use 4-bit: {use_4bit}")
-    print(f"  Output Directory: {output_dir}")
-    
-    # Call the training function
-    trainer, model, tokenizer = train(
+    # Execute the training
+    return training_func.remote(
         model_name=model_name,
-        output_dir=output_dir,
-        num_train_epochs=num_epochs,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
-        gradient_accumulation_steps=4,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
         learning_rate=learning_rate,
-        warmup_steps=500,
         max_length=max_length,
         use_lora=use_lora,
         use_4bit=use_4bit,
-        use_deepspeed=True,
-        deepspeed_config_path="/root/app/configs/deepspeed_config.json",
         train_sample_size=train_sample_size,
-        val_sample_size=500,
-        seed=42,
         run_name=run_name,
-        wandb_project="olmo-finetune-modal"
     )
-    
-    # Commit volumes to persist checkpoints
-    model_volume.commit()
-    
-    print(f"Training completed! Model saved to: {output_dir}")
-    return output_dir
 
 
 @app.function(
     image=image,
-    gpu=gpu_config,
+    gpu=get_gpu_config("A100", 1),  # Single GPU for inference
     volumes={MODEL_DIR: model_volume},
     timeout=3600,
     secrets=[modal.Secret.from_name("huggingface-token")],
@@ -295,6 +452,33 @@ def cleanup_old_checkpoints(keep_last_n: int = 5):
     print(f"Cleanup completed. Kept {min(len(runs), keep_last_n)} most recent runs.")
 
 
+@app.function(
+    image=image,
+    timeout=300,
+)
+def show_gpu_recommendations(use_case: str = "training"):
+    """Show GPU recommendations for different use cases."""
+    recommendations = get_gpu_recommendations(use_case)
+    
+    print(f"\nGPU Recommendations for {use_case.title()}:")
+    print("=" * 50)
+    
+    for tier, config in recommendations.items():
+        gpu_config = get_gpu_config(config["type"], config["count"])
+        print(f"\n{tier.title()}: {gpu_config}")
+        print(f"  Description: {config['description']}")
+        print(f"  Command: --gpu_type {config['type']} --gpu_count {config['count']}")
+    
+    print(f"\nAvailable GPU Types:")
+    print("T4, L4, A10, A100, A100-40GB, A100-80GB, L40S, H100, H100i, H200, B200")
+    
+    print(f"\nGPU Count Limits:")
+    print("- A10: Maximum 4 GPUs per container")
+    print("- All others: Maximum 8 GPUs per container")
+    
+    return recommendations
+
+
 @app.local_entrypoint()
 def main(
     action: str = "train",
@@ -309,6 +493,8 @@ def main(
     run_name: str = None,
     checkpoint_path: str = None,
     prompt: str = None,
+    gpu_type: str = "A100",
+    gpu_count: int = 2,
 ):
     """
     Main entry point for Modal app.
@@ -318,11 +504,12 @@ def main(
     - test: Test inference with a checkpoint
     - list: List available checkpoints
     - cleanup: Clean up old checkpoints
+    - recommendations: Show GPU recommendations for different use cases
     """
     
     if action == "train":
-        print("Starting training job on Modal...")
-        result = train_olmo_model.remote(
+        print(f"Starting training job on Modal with {gpu_type}:{gpu_count} GPU configuration...")
+        result = train_olmo_model(
             model_name=model_name,
             num_epochs=num_epochs,
             batch_size=batch_size,
@@ -332,6 +519,8 @@ def main(
             use_4bit=use_4bit,
             train_sample_size=train_sample_size,
             run_name=run_name,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
         )
         print(f"Training completed! Output directory: {result}")
         
@@ -361,9 +550,15 @@ def main(
         cleanup_old_checkpoints.remote()
         print("Cleanup completed.")
         
+    elif action == "recommendations":
+        print("Showing GPU recommendations...")
+        show_gpu_recommendations.remote("training")
+        show_gpu_recommendations.remote("inference")
+        show_gpu_recommendations.remote("development")
+        
     else:
         print(f"Unknown action: {action}")
-        print("Available actions: train, test, list, cleanup")
+        print("Available actions: train, test, list, cleanup, recommendations")
 
 
 if __name__ == "__main__":
@@ -375,7 +570,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Modal OLMo Fine-tuning App")
-    parser.add_argument("--action", type=str, default="train", choices=["train", "test", "list", "cleanup"])
+    parser.add_argument("--action", type=str, default="train", choices=["train", "test", "list", "cleanup", "recommendations"])
     parser.add_argument("--model_name", type=str, default="allenai/OLMo-2-1124-7B")
     parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -387,6 +582,11 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--checkpoint_path", type=str, default=None)
     parser.add_argument("--prompt", type=str, default=None)
+    parser.add_argument("--gpu_type", type=str, default="A100", 
+                       choices=["T4", "L4", "A10", "A100", "A100-40GB", "A100-80GB", "L40S", "H100", "H100i", "H200", "B200"],
+                       help="GPU type to use for training")
+    parser.add_argument("--gpu_count", type=int, default=2, 
+                       help="Number of GPUs to use (1-8 for most types, 1-4 for A10)")
     
     args = parser.parse_args()
     
@@ -403,4 +603,6 @@ if __name__ == "__main__":
         run_name=args.run_name,
         checkpoint_path=args.checkpoint_path,
         prompt=args.prompt,
+        gpu_type=args.gpu_type,
+        gpu_count=args.gpu_count,
     )

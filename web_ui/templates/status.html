@@ -72,6 +72,12 @@
                                 {% endif %}
                             </dd>
                         </div>
+                        {% if deployment.config.gpu_type %}
+                        <div class="flex justify-between">
+                            <dt class="text-sm text-gray-600">GPU Config:</dt>
+                            <dd class="text-sm font-medium">{{ deployment.config.gpu_type }}:{{ deployment.config.gpu_count|default(2) }}</dd>
+                        </div>
+                        {% endif %}
                     </dl>
                 </div>
                 <div>
