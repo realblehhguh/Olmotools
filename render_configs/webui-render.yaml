@@ -1,0 +1,45 @@
+disks:
+- mountPath: /opt/render/project/src/modal_olmo_finetune/web_ui
+  name: olmo-webui-storage
+  sizeGB: 1
+services:
+- autoDeploy: true
+  buildCommand: cd modal_olmo_finetune && pip install --upgrade pip && pip install
+    -r web_ui/deployer_requirements.txt
+  envVars:
+  - key: MODAL_TOKEN_ID
+    sync: false
+  - key: MODAL_TOKEN_SECRET
+    sync: false
+  - generateValue: true
+    key: DEPLOY_API_KEY
+    sync: false
+  - generateValue: true
+    key: FLASK_SECRET_KEY
+    sync: false
+  - key: WANDB_API_KEY
+    sync: false
+  - key: WANDB_ENTITY
+    value: your-wandb-entity
+  - key: WANDB_PROJECT
+    value: olmo-finetune-modal
+  - key: FLASK_ENV
+    value: production
+  - key: PYTHON_VERSION
+    value: '3.10'
+  - key: TZ
+    value: America/Los_Angeles
+  - key: LOG_LEVEL
+    value: INFO
+  - key: ALLOWED_ORIGINS
+    value: '*'
+  healthCheckPath: /health
+  name: olmo-training-webui
+  plan: starter
+  region: oregon
+  runtime: python
+  scaling:
+    maxInstances: 1
+    minInstances: 1
+  startCommand: cd modal_olmo_finetune/web_ui && python training_deployer.py
+  type: web

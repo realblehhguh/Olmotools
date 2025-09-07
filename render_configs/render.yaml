@@ -1,9 +1,9 @@
-# Render deployment configuration for OLMo Discord Bot
-# This file configures the Discord bot to run on Render's cloud platform
+# Render deployment configuration for OLMo Discord Bot with Health Check
+# This file configures the Discord bot as a web service for UptimeRobot monitoring
 
 services:
-  # Discord Bot Service
-  - type: worker
+  # Discord Bot as Web Service (with health check endpoint)
+  - type: web
     name: olmo-discord-bot
     runtime: python
     region: oregon # Options: oregon, ohio, virginia, frankfurt, singapore
@@ -14,11 +14,11 @@ services:
       pip install --upgrade pip
       pip install -r bot_requirements.txt
     
-    # Start command
-    startCommand: python discord_bot.py
+    # Start command - using the bot with health check
+    startCommand: python discord_bot_with_health.py
     
-    # Health check (worker services don't need HTTP health checks)
-    healthCheckPath: /
+    # Health check path for Render and UptimeRobot
+    healthCheckPath: /health
     
     # Environment variables (set these in Render dashboard)
     envVars:

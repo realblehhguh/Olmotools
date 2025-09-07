@@ -1,0 +1,124 @@
+# Render deployment configuration for OLMo Training Deployer Web UI
+# This service provides a web interface to deploy training jobs to Modal
+
+services:
+  # Training Deployer Web Service
+  - type: web
+    name: olmo-training-deployer
+    runtime: python
+    region: oregon # Options: oregon, ohio, virginia, frankfurt, singapore
+    plan: starter # Options: starter ($7/month), standard ($25/month)
+    
+    # Build configuration
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r deployer_requirements.txt
+    
+    # Start command - runs the Flask app
+    startCommand: python training_deployer.py
+    
+    # Health check endpoint
+    healthCheckPath: /health
+    
+    # Environment variables (set these in Render dashboard)
+    envVars:
+      # Modal Configuration (REQUIRED)
+      - key: MODAL_TOKEN_ID
+        sync: false # Must be set manually in Render dashboard
+      
+      - key: MODAL_TOKEN_SECRET
+        sync: false # Must be set manually in Render dashboard
+      
+      # Security Configuration (REQUIRED)
+      - key: DEPLOY_API_KEY
+        generateValue: true # Render will generate a secure key
+        sync: false
+      
+      - key: FLASK_SECRET_KEY
+        generateValue: true # Render will generate a secure key
+        sync: false
+      
+      # Weights & Biases Configuration (OPTIONAL)
+      - key: WANDB_API_KEY
+        sync: false # Set if you want W&B integration
+      
+      - key: WANDB_ENTITY
+        value: your-wandb-entity # Update with your W&B entity/username
+      
+      - key: WANDB_PROJECT
+        value: olmo-finetune-modal
+      
+      # Application Settings
+      - key: FLASK_ENV
+        value: production
+      
+      - key: PYTHON_VERSION
+        value: "3.10"
+      
+      - key: TZ
+        value: America/Los_Angeles
+      
+      - key: LOG_LEVEL
+        value: INFO
+      
+      # CORS Configuration
+      - key: ALLOWED_ORIGINS
+        value: "*" # Update with specific origins in production
+    
+    # Auto-deploy settings
+    autoDeploy: true # Automatically deploy on git push
+    
+    # Scaling
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+    
+    # Resources (based on plan)
+    # starter: 512MB RAM, 0.5 CPU
+    # standard: 2GB RAM, 1 CPU
+
+# Persistent Disk for deployment history
+disks:
+  - name: olmo-deployer-storage
+    mountPath: /opt/render/project/src
+    sizeGB: 1 # 1GB for deployment history and configs
+
+# Build configuration
+buildFilter:
+  paths:
+    - training_deployer.py
+    - deployer_requirements.txt
+    - deploy_modal.py
+    - templates/**
+    - static/**
+  ignoredPaths:
+    - "*.md"
+    - ".git"
+    - "__pycache__"
+    - "*.pyc"
+    - ".env"
+    - ".env.local"
+    - "test_*.py"
+
+# Deployment Instructions:
+# 
+# 1. Create a new Web Service on Render
+# 2. Connect your GitHub repository
+# 3. Use this render-training.yaml file for configuration
+# 4. Set the following environment variables in Render dashboard:
+#    - MODAL_TOKEN_ID: Your Modal token ID
+#    - MODAL_TOKEN_SECRET: Your Modal token secret
+#    - DEPLOY_API_KEY: A secure API key for deployment authorization
+#    - FLASK_SECRET_KEY: A secure secret for Flask sessions
+#    - WANDB_API_KEY: (Optional) Your W&B API key
+# 
+# 5. Deploy the service
+# 6. Access your deployment UI at: https://olmo-training-deployer.onrender.com
+# 
+# API Endpoints:
+# - GET /: Main deployment interface
+# - POST /deploy: Deploy a training job (requires API key)
+# - GET /status: View all deployments
+# - GET /status/<id>: View specific deployment
+# - GET /api/status/<id>: JSON API for deployment status
+# - GET /health: Health check endpoint
