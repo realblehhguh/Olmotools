@@ -12,4 +12,4 @@ python-dotenv
 uuid
 
 # For deployment functionality (reuse from main requirements)
-wand
+wandb
