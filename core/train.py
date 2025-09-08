@@ -20,13 +20,25 @@ from transformers import (
 from transformers.trainer_callback import TrainerCallback
 import wandb
 
-from .model_utils import (
-    load_olmo_model_and_tokenizer,
-    create_training_arguments,
-    prepare_model_for_training,
-    save_model_checkpoint
-)
-from .data_utils import create_data_module
+# Import modules - handle both relative and absolute imports for Modal compatibility
+try:
+    # Try relative imports first (when run as module)
+    from .model_utils import (
+        load_olmo_model_and_tokenizer,
+        create_training_arguments,
+        prepare_model_for_training,
+        save_model_checkpoint
+    )
+    from .data_utils import create_data_module
+except ImportError:
+    # Fall back to absolute imports (when run directly in Modal)
+    from model_utils import (
+        load_olmo_model_and_tokenizer,
+        create_training_arguments,
+        prepare_model_for_training,
+        save_model_checkpoint
+    )
+    from data_utils import create_data_module
 
 # Setup logging
 logging.basicConfig(
