@@ -41,15 +41,30 @@ def load_olmo_model_and_tokenizer(
     use_4bit: bool = False,
     load_in_8bit: bool = False,
     device_map: str = "auto",
-    torch_dtype: torch.dtype = torch.float16
+    torch_dtype: torch.dtype = torch.float16,
+    use_deepspeed: bool = False
 ) -> tuple:
     """Load OLMo model and tokenizer with optional quantization and LoRA."""
     
     logger.info(f"Loading model: {model_name}")
     
+    # Check for distributed training environment
+    is_distributed = (
+        use_deepspeed or 
+        os.environ.get("WORLD_SIZE", "1") != "1" or
+        os.environ.get("LOCAL_RANK") is not None or
+        os.environ.get("RANK") is not None
+    )
+    
+    if is_distributed:
+        logger.info("Distributed training detected - disabling device_map to avoid conflicts")
+        device_map = None
+    
     # Quantization config if using 4-bit or 8-bit
     bnb_config = None
     if use_4bit:
+        if is_distributed:
+            logger.warning("4-bit quantization may not work well with distributed training")
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
@@ -58,6 +73,8 @@ def load_olmo_model_and_tokenizer(
         )
         logger.info("Using 4-bit quantization")
     elif load_in_8bit:
+        if is_distributed:
+            logger.warning("8-bit quantization may not work well with distributed training")
         bnb_config = BitsAndBytesConfig(
             load_in_8bit=True
         )
@@ -85,9 +102,12 @@ def load_olmo_model_and_tokenizer(
     model_kwargs = {
         "pretrained_model_name_or_path": model_name,
         "trust_remote_code": True,
-        "device_map": device_map,
         "torch_dtype": torch_dtype,
     }
+    
+    # Only add device_map if not using distributed training
+    if device_map is not None:
+        model_kwargs["device_map"] = device_map
     
     if bnb_config:
         model_kwargs["quantization_config"] = bnb_config

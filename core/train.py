@@ -130,7 +130,8 @@ def train(
         model_name=model_name,
         use_lora=use_lora,
         use_4bit=use_4bit,
-        torch_dtype=torch.float16 if not use_4bit else torch.float16
+        torch_dtype=torch.float16 if not use_4bit else torch.float16,
+        use_deepspeed=use_deepspeed
     )
     
     # Prepare model for training
