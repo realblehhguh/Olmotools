@@ -21,7 +21,57 @@ image = (
         "apt-get install -y libopenmpi-dev openmpi-bin",
         "mkdir -p /root/app/configs",
     )
-    .pip_install_from_requirements("../requirements.txt")
+)
+
+# Get requirements.txt path with proper resolution
+def get_requirements_path():
+    """Get the absolute path to requirements.txt, handling different deployment environments."""
+    possible_paths = [
+        "../requirements.txt",                    # Local development from core/
+        "requirements.txt",                       # When running from project root
+        "./requirements.txt",                     # Current directory
+        "/opt/render/project/requirements.txt",   # Render deployment
+        "modal_olmo_finetune/requirements.txt",   # From parent directory
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # If none found, return the most likely path and let it fail with a clear error
+    return "requirements.txt"
+
+# Continue building the image with requirements
+try:
+    requirements_path = get_requirements_path()
+    image = image.pip_install_from_requirements(requirements_path)
+except Exception as e:
+    print(f"Warning: Could not install from requirements.txt: {e}")
+    print("Installing basic packages manually...")
+    # Fallback to manual package installation
+    image = image.pip_install(
+        "torch>=2.0.0",
+        "transformers>=4.30.0",
+        "datasets>=2.12.0",
+        "accelerate>=0.20.0",
+        "deepspeed>=0.9.0",
+        "peft>=0.4.0",
+        "bitsandbytes>=0.39.0",
+        "wandb>=0.15.0",
+        "huggingface_hub>=0.15.0",
+        "tokenizers>=0.13.0",
+        "numpy>=1.24.0",
+        "scipy>=1.10.0",
+        "scikit-learn>=1.2.0",
+        "matplotlib>=3.7.0",
+        "seaborn>=0.12.0",
+        "tqdm>=4.65.0",
+        "psutil>=5.9.0",
+        "flask>=2.3.0",
+        "flask-cors>=4.0.0",
+    )
+
+image = image
     .run_commands(
         # Set CUDA environment variables for DeepSpeed
         "export CUDA_HOME=/usr/local/cuda",
