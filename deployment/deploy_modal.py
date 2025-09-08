@@ -26,6 +26,12 @@ def deploy_training(
     run_name: str = None,
     gpu_type: str = "A100",
     gpu_count: int = 2,
+    # HuggingFace Hub parameters
+    push_to_hf: bool = False,
+    hf_repo_name: str = None,
+    hf_token: str = None,
+    hf_private: bool = False,
+    hf_description: str = None,
 ):
     """Deploy and run training job on Modal."""
     

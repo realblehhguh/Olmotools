@@ -27,7 +27,8 @@ try:
         load_olmo_model_and_tokenizer,
         create_training_arguments,
         prepare_model_for_training,
-        save_model_checkpoint
+        save_model_checkpoint,
+        save_and_push_model
     )
     from .data_utils import create_data_module
 except ImportError:
@@ -36,7 +37,8 @@ except ImportError:
         load_olmo_model_and_tokenizer,
         create_training_arguments,
         prepare_model_for_training,
-        save_model_checkpoint
+        save_model_checkpoint,
+        save_and_push_model
     )
     from data_utils import create_data_module
 
@@ -110,7 +112,13 @@ def train(
     seed: int = 42,
     run_name: Optional[str] = None,
     wandb_project: str = "olmo-finetune",
-    resume_from_checkpoint: Optional[str] = None
+    resume_from_checkpoint: Optional[str] = None,
+    # HuggingFace Hub parameters
+    push_to_hf: bool = False,
+    hf_repo_name: Optional[str] = None,
+    hf_token: Optional[str] = None,
+    hf_private: bool = False,
+    hf_description: Optional[str] = None
 ):
     """Main training function."""
     
@@ -214,24 +222,63 @@ def train(
     # Start training
     train_result = trainer.train(resume_from_checkpoint=checkpoint)
     
-    # Save final model
+    # Save final model and optionally push to HuggingFace
     logger.info("Saving final model...")
-    trainer.save_model(os.path.join(output_dir, "final_model"))
-    tokenizer.save_pretrained(os.path.join(output_dir, "final_model"))
+    
+    # Prepare training config for model card
+    training_config = {
+        'num_epochs': num_train_epochs,
+        'batch_size': per_device_train_batch_size,
+        'learning_rate': learning_rate,
+        'max_length': max_length,
+        'gpu_type': 'A100',  # Default, could be passed as parameter
+        'gpu_count': 2,      # Default, could be passed as parameter
+        'use_lora': use_lora,
+        'use_4bit': use_4bit,
+        'train_sample_size': train_sample_size
+    }
+    
+    # Use the new save_and_push_model function
+    save_result = save_and_push_model(
+        model=model,
+        tokenizer=tokenizer,
+        output_dir=output_dir,
+        model_name="final_model",
+        push_to_hf=push_to_hf,
+        hf_repo_name=hf_repo_name,
+        hf_token=hf_token,
+        hf_private=hf_private,
+        hf_description=hf_description,
+        base_model=model_name,
+        training_config=training_config,
+        use_lora=use_lora
+    )
     
     # Save training metrics
     metrics = train_result.metrics
     with open(os.path.join(output_dir, "training_metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
     
+    # Log results
+    if save_result['local_save']['success']:
+        logger.info(f"Final model saved to: {save_result['local_save']['path']}")
+    else:
+        logger.error(f"Failed to save model: {save_result['local_save']['error']}")
+    
+    if push_to_hf:
+        if save_result['hf_push']['success']:
+            logger.info(f"Model successfully pushed to HuggingFace: {save_result['hf_push']['repo_url']}")
+        elif not save_result['hf_push']['skipped']:
+            logger.error(f"Failed to push to HuggingFace: {save_result['hf_push']['error']}")
+    
     logger.info("Training completed successfully!")
-    logger.info(f"Final model saved to: {output_dir}/final_model")
     
     # Close W&B run if initialized
     if wandb.run is not None:
         wandb.finish()
     
-    return trainer, model, tokenizer
+    # Return results including save/push information
+    return trainer, model, tokenizer, save_result
 
 
 def main():

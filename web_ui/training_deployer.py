@@ -172,7 +172,13 @@ def run_deployment(deployment_id: str, config: Dict):
             train_sample_size=config.get('train_sample_size'),
             run_name=config.get('run_name', f"web_deploy_{deployment_id[:8]}"),
             gpu_type=config.get('gpu_type', 'A100'),
-            gpu_count=config.get('gpu_count', 2)
+            gpu_count=config.get('gpu_count', 2),
+            # HuggingFace Hub parameters
+            push_to_hf=config.get('push_to_hf', False),
+            hf_repo_name=config.get('hf_repo_name'),
+            hf_token=config.get('hf_token'),
+            hf_private=config.get('hf_private', False),
+            hf_description=config.get('hf_description')
         )
         
         # Update status on success
@@ -232,7 +238,13 @@ def deploy():
             'run_name': data.get('run_name', ''),
             'preset': data.get('preset', 'custom'),
             'gpu_type': data.get('gpu_type', 'A100'),
-            'gpu_count': int(data.get('gpu_count', 2))
+            'gpu_count': int(data.get('gpu_count', 2)),
+            # HuggingFace Hub parameters
+            'push_to_hf': data.get('push_to_hf', 'false').lower() == 'true',
+            'hf_repo_name': data.get('hf_repo_name', '').strip() or None,
+            'hf_token': data.get('hf_token', '').strip() or None,
+            'hf_private': data.get('hf_private', 'false').lower() == 'true',
+            'hf_description': data.get('hf_description', '').strip() or None
         }
         
         # Apply presets

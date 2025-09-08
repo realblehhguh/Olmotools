@@ -15,6 +15,16 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 import logging
 
+# Import HuggingFace utilities
+try:
+    from .huggingface_utils import push_model_to_huggingface
+except ImportError:
+    # Fall back to absolute import for Modal compatibility
+    try:
+        from huggingface_utils import push_model_to_huggingface
+    except ImportError:
+        push_model_to_huggingface = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -278,3 +288,110 @@ def save_model_checkpoint(
     tokenizer.save_pretrained(checkpoint_path)
     
     logger.info(f"Checkpoint saved successfully")
+
+
+def save_and_push_model(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    output_dir: str,
+    model_name: str = "final_model",
+    push_to_hf: bool = False,
+    hf_repo_name: Optional[str] = None,
+    hf_token: Optional[str] = None,
+    hf_private: bool = False,
+    hf_description: Optional[str] = None,
+    base_model: str = "allenai/OLMo-2-1124-7B",
+    training_config: Optional[Dict[str, Any]] = None,
+    use_lora: bool = True
+) -> Dict[str, Any]:
+    """
+    Save model locally and optionally push to HuggingFace Hub.
+    
+    Args:
+        model: The trained model
+        tokenizer: The tokenizer
+        output_dir: Local output directory
+        model_name: Name for the saved model directory
+        push_to_hf: Whether to push to HuggingFace Hub
+        hf_repo_name: HuggingFace repository name
+        hf_token: HuggingFace token
+        hf_private: Whether to create private repository
+        hf_description: Description for the model
+        base_model: Base model name
+        training_config: Training configuration dictionary
+        use_lora: Whether LoRA was used
+        
+    Returns:
+        Dict with save and push results
+    """
+    result = {
+        'local_save': {'success': False, 'path': None, 'error': None},
+        'hf_push': {'success': False, 'repo_url': None, 'error': None, 'skipped': not push_to_hf}
+    }
+    
+    # Save model locally
+    try:
+        model_path = os.path.join(output_dir, model_name)
+        logger.info(f"Saving model to {model_path}")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(model_path, exist_ok=True)
+        
+        # Save model and tokenizer
+        model.save_pretrained(model_path)
+        tokenizer.save_pretrained(model_path)
+        
+        result['local_save'].update({
+            'success': True,
+            'path': model_path
+        })
+        
+        logger.info(f"Model saved successfully to {model_path}")
+        
+    except Exception as e:
+        error_msg = f"Failed to save model locally: {str(e)}"
+        logger.error(error_msg)
+        result['local_save']['error'] = error_msg
+        return result  # Don't attempt HF push if local save failed
+    
+    # Push to HuggingFace Hub if requested
+    if push_to_hf and push_model_to_huggingface is not None:
+        if not hf_repo_name:
+            result['hf_push']['error'] = "HuggingFace repository name is required for pushing"
+            return result
+        
+        try:
+            logger.info(f"Pushing model to HuggingFace Hub: {hf_repo_name}")
+            
+            hf_result = push_model_to_huggingface(
+                model_path=model_path,
+                repo_name=hf_repo_name,
+                token=hf_token,
+                private=hf_private,
+                description=hf_description,
+                base_model=base_model,
+                training_config=training_config,
+                use_lora=use_lora
+            )
+            
+            if hf_result['success']:
+                result['hf_push'].update({
+                    'success': True,
+                    'repo_url': hf_result['repo_url'],
+                    'files_uploaded': hf_result.get('files_uploaded', [])
+                })
+                logger.info(f"Successfully pushed model to HuggingFace: {hf_result['repo_url']}")
+            else:
+                result['hf_push']['error'] = hf_result['error']
+                logger.error(f"Failed to push to HuggingFace: {hf_result['error']}")
+                
+        except Exception as e:
+            error_msg = f"Error during HuggingFace push: {str(e)}"
+            logger.error(error_msg)
+            result['hf_push']['error'] = error_msg
+            
+    elif push_to_hf and push_model_to_huggingface is None:
+        result['hf_push']['error'] = "HuggingFace utilities not available. Please install huggingface_hub."
+        logger.warning("HuggingFace push requested but utilities not available")
+    
+    return result
