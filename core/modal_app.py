@@ -350,19 +350,22 @@ def train_olmo_model_impl(
     try:
         from modal_device_fix import setup_modal_environment_for_training, apply_modal_device_fixes
         
+        # For Modal, we typically want to avoid distributed training complications
+        # Use single GPU approach even with multiple GPUs available
+        # This prevents the MASTER_ADDR error and simplifies device management
+        effective_gpu_count = 1  # Force single GPU mode for Modal
+        
         # Setup Modal environment for proper device placement
-        setup_modal_environment_for_training(gpu_count=gpu_count, force_cpu_start=True)
+        setup_modal_environment_for_training(gpu_count=effective_gpu_count, force_cpu_start=True)
         apply_modal_device_fixes()
         
-        print("Applied Modal-specific device placement fixes")
+        print(f"Applied Modal-specific device placement fixes (using single GPU mode)")
     except ImportError as e:
         print(f"Warning: Could not import modal_device_fix: {e}")
-        # Fallback to basic environment setup
-        if gpu_count > 1:
-            os.environ["WORLD_SIZE"] = str(gpu_count)
-            os.environ["LOCAL_RANK"] = "0"
-            os.environ["RANK"] = "0"
-            print(f"Set distributed environment variables for {gpu_count} GPUs")
+        # Fallback: ensure no distributed training environment variables are set
+        for var in ["WORLD_SIZE", "LOCAL_RANK", "RANK", "MASTER_ADDR", "MASTER_PORT"]:
+            os.environ.pop(var, None)
+        print("Cleared distributed environment variables for single GPU training")
     
     # Call the training function
     trainer, model, tokenizer = train(

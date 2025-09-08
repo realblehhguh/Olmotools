@@ -24,7 +24,16 @@ def setup_modal_environment_for_training(gpu_count: int = 1, force_cpu_start: bo
         os.environ["WORLD_SIZE"] = str(gpu_count)
         os.environ["LOCAL_RANK"] = "0"
         os.environ["RANK"] = "0"
+        # Set required distributed training environment variables
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
         logger.info(f"Set distributed environment variables for {gpu_count} GPUs")
+    else:
+        # For single GPU, ensure we don't trigger distributed training
+        # Remove any existing distributed environment variables
+        for var in ["WORLD_SIZE", "LOCAL_RANK", "RANK", "MASTER_ADDR", "MASTER_PORT"]:
+            os.environ.pop(var, None)
+        logger.info("Cleared distributed environment variables for single GPU training")
     
     # Set Modal-specific environment variables
     os.environ["MODAL_ENVIRONMENT"] = "true"
