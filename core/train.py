@@ -169,6 +169,13 @@ def train(
     
     # Initialize trainer
     logger.info("Initializing trainer...")
+    
+    # For DeepSpeed, ensure model is on CPU before trainer initialization
+    # DeepSpeed will handle moving it to GPU
+    if use_deepspeed and torch.cuda.is_available():
+        logger.info("Ensuring model is on CPU for DeepSpeed initialization...")
+        model = model.cpu()
+    
     trainer = Trainer(
         model=model,
         args=training_args,

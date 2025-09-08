@@ -118,6 +118,15 @@ def load_olmo_model_and_tokenizer(
         delay=10
     )
     
+    # Handle device placement when device_map is disabled for distributed training
+    if is_distributed and device_map is None:
+        if torch.cuda.is_available():
+            # For distributed training, let the training framework handle device placement
+            # Don't move to GPU here as DeepSpeed will handle it
+            logger.info("Device placement will be handled by distributed training framework")
+        else:
+            logger.warning("CUDA not available - model will remain on CPU")
+    
     # Prepare model for training if using quantization
     if use_4bit or load_in_8bit:
         model = prepare_model_for_kbit_training(model)
