@@ -24,6 +24,8 @@ def deploy_training(
     use_4bit: bool = False,
     train_sample_size: int = None,
     run_name: str = None,
+    gpu_type: str = "A100",
+    gpu_count: int = 2,
 ):
     """Deploy and run training job on Modal."""
     

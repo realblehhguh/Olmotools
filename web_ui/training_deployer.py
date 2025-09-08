@@ -110,7 +110,9 @@ def run_deployment(deployment_id: str, config: Dict):
         active_deployments[deployment_id]['start_time'] = datetime.now().isoformat()
         
         # Import deployment function
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        # Add the parent directory to sys.path to access the deployment module
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, parent_dir)
         from deployment.deploy_modal import deploy_training
         
         # Run deployment
