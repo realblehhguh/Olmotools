@@ -141,6 +141,14 @@ def load_olmo_model_and_tokenizer(
             model = model.cpu()
         else:
             logger.warning("CUDA not available - model will remain on CPU")
+    elif device_map is None and torch.cuda.is_available():
+        # For single GPU training without device_map, ensure model is on the correct device
+        logger.info("Single GPU training detected - ensuring model is on cuda:0")
+        model = model.cuda(0)
+        # Ensure all parameters are on the same device
+        for name, param in model.named_parameters():
+            if param.device.type != 'cuda' or param.device.index != 0:
+                param.data = param.data.cuda(0)
     
     # Prepare model for training if using quantization
     if use_4bit or load_in_8bit:

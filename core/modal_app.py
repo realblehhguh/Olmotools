@@ -355,28 +355,37 @@ def train_olmo_model_impl(
     
     # Apply Modal-specific device placement fixes
     sys.path.append("/root/app")  # Ensure we can import modal_device_fix
+    
+    # Force single GPU mode for Modal to avoid device placement issues
+    print("Configuring Modal for single GPU training to avoid device placement issues...")
+    
+    # Clear all distributed training environment variables
+    for var in ["WORLD_SIZE", "LOCAL_RANK", "RANK", "MASTER_ADDR", "MASTER_PORT"]:
+        os.environ.pop(var, None)
+    
+    # Set CUDA_VISIBLE_DEVICES to only use the first GPU
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    
+    # Force PyTorch to use only one GPU
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+        print(f"Set CUDA device to 0. Available GPUs: {torch.cuda.device_count()}")
+    
     try:
         from modal_device_fix import setup_modal_environment_for_training, apply_modal_device_fixes
         
-        # For Modal, we typically want to avoid distributed training complications
-        # Use single GPU approach even with multiple GPUs available
-        # This prevents the MASTER_ADDR error and simplifies device management
-        effective_gpu_count = 1  # Force single GPU mode for Modal
-        
-        # Setup Modal environment for proper device placement
-        setup_modal_environment_for_training(gpu_count=effective_gpu_count, force_cpu_start=True)
+        # Setup Modal environment for single GPU training
+        setup_modal_environment_for_training(gpu_count=1, force_cpu_start=True)
         apply_modal_device_fixes()
         
-        print(f"Applied Modal-specific device placement fixes (using single GPU mode)")
+        print(f"Applied Modal-specific device placement fixes (single GPU mode)")
     except ImportError as e:
         print(f"Warning: Could not import modal_device_fix: {e}")
-        # Fallback: ensure no distributed training environment variables are set
-        for var in ["WORLD_SIZE", "LOCAL_RANK", "RANK", "MASTER_ADDR", "MASTER_PORT"]:
-            os.environ.pop(var, None)
-        print("Cleared distributed environment variables for single GPU training")
+        print("Using fallback device configuration")
     
-    # For Modal single GPU mode, disable DeepSpeed to avoid device placement issues
-    use_deepspeed_for_training = False  # Disable DeepSpeed for Modal to simplify device management
+    # For Modal, always disable DeepSpeed to avoid device placement issues
+    use_deepspeed_for_training = False
+    print("DeepSpeed disabled for Modal to ensure proper device placement")
     
     # Call the training function
     trainer, model, tokenizer, save_result = train(
