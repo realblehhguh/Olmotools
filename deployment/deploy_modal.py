@@ -50,8 +50,8 @@ def deploy_training(
     
     # Deploy the app and run training
     with app.run():
-        # Call the training function remotely
-        result = train_olmo_model.remote(
+        # Call the training function (it handles Modal function creation and remote execution internally)
+        result = train_olmo_model(
             model_name=model_name,
             num_epochs=num_epochs,
             batch_size=batch_size,
@@ -61,6 +61,8 @@ def deploy_training(
             use_4bit=use_4bit,
             train_sample_size=train_sample_size,
             run_name=run_name,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
         )
         
         print(f"✅ Training job completed!")
