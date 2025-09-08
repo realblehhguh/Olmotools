@@ -134,11 +134,13 @@ try:
     train_py_path = get_file_path("train.py", ["core", "src", ""])
     data_utils_path = get_file_path("data_utils.py", ["core", "src", ""])
     model_utils_path = get_file_path("model_utils.py", ["core", "src", ""])
+    huggingface_utils_path = get_file_path("huggingface_utils.py", ["core", "src", ""])
     modal_device_fix_path = get_file_path("modal_device_fix.py", ["", "src", "."])
     
     image = image.add_local_file(train_py_path, "/root/app/train.py")
     image = image.add_local_file(data_utils_path, "/root/app/data_utils.py")
     image = image.add_local_file(model_utils_path, "/root/app/model_utils.py")
+    image = image.add_local_file(huggingface_utils_path, "/root/app/huggingface_utils.py")
     image = image.add_local_file(modal_device_fix_path, "/root/app/modal_device_fix.py")
 except Exception as e:
     print(f"Warning: Could not add core files to image: {e}")
@@ -288,6 +290,12 @@ def train_olmo_model_impl(
     run_name: str = None,
     gpu_type: str = "A100",
     gpu_count: int = 2,
+    # HuggingFace Hub parameters
+    push_to_hf: bool = False,
+    hf_repo_name: str = None,
+    hf_token: str = None,
+    hf_private: bool = False,
+    hf_description: str = None,
 ):
     """Train OLMo model on Modal with DeepSpeed."""
     
@@ -371,7 +379,7 @@ def train_olmo_model_impl(
     use_deepspeed_for_training = False  # Disable DeepSpeed for Modal to simplify device management
     
     # Call the training function
-    trainer, model, tokenizer = train(
+    trainer, model, tokenizer, save_result = train(
         model_name=model_name,
         output_dir=output_dir,
         num_train_epochs=num_epochs,
@@ -389,7 +397,13 @@ def train_olmo_model_impl(
         val_sample_size=500,
         seed=42,
         run_name=run_name,
-        wandb_project="olmo-finetune-modal"
+        wandb_project="olmo-finetune-modal",
+        # HuggingFace Hub parameters
+        push_to_hf=push_to_hf,
+        hf_repo_name=hf_repo_name,
+        hf_token=hf_token,
+        hf_private=hf_private,
+        hf_description=hf_description
     )
     
     # Commit volumes to persist checkpoints
@@ -411,6 +425,12 @@ def train_olmo_model(
     run_name: str = None,
     gpu_type: str = "A100",
     gpu_count: int = 2,
+    # HuggingFace Hub parameters
+    push_to_hf: bool = False,
+    hf_repo_name: str = None,
+    hf_token: str = None,
+    hf_private: bool = False,
+    hf_description: str = None,
 ):
     """
     Train OLMo model on Modal with configurable GPU settings.
@@ -437,6 +457,12 @@ def train_olmo_model(
         run_name=run_name,
         gpu_type=gpu_type,
         gpu_count=gpu_count,
+        # HuggingFace Hub parameters
+        push_to_hf=push_to_hf,
+        hf_repo_name=hf_repo_name,
+        hf_token=hf_token,
+        hf_private=hf_private,
+        hf_description=hf_description,
     )
 
 
