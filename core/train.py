@@ -42,6 +42,14 @@ except ImportError:
     )
     from data_utils import create_data_module
 
+# Setup logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
 # Import comprehensive device fix
 try:
     from ..comprehensive_device_fix import (
@@ -58,14 +66,6 @@ except ImportError:
         logger.warning("Comprehensive device fix not available - using fallback device handling")
         ComprehensiveDeviceManager = None
         apply_comprehensive_device_fix = None
-
-# Setup logging
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
 
 
 class SaveCheckpointCallback(TrainerCallback):

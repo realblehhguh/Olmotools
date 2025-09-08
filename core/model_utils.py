@@ -25,6 +25,9 @@ except ImportError:
     except ImportError:
         push_model_to_huggingface = None
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import comprehensive device fix
 try:
     from ..comprehensive_device_fix import (
@@ -47,9 +50,6 @@ except ImportError:
         apply_comprehensive_device_fix = None
         create_device_safe_model_loader = None
         create_device_safe_lora_wrapper = None
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 def retry_on_network_error(func, max_retries=3, delay=10):

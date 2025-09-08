@@ -136,12 +136,14 @@ try:
     model_utils_path = get_file_path("model_utils.py", ["core", "src", ""])
     huggingface_utils_path = get_file_path("huggingface_utils.py", ["core", "src", ""])
     modal_device_fix_path = get_file_path("modal_device_fix.py", ["", "src", "."])
+    comprehensive_device_fix_path = get_file_path("comprehensive_device_fix.py", ["", "src", "."])
     
     image = image.add_local_file(train_py_path, "/root/app/train.py")
     image = image.add_local_file(data_utils_path, "/root/app/data_utils.py")
     image = image.add_local_file(model_utils_path, "/root/app/model_utils.py")
     image = image.add_local_file(huggingface_utils_path, "/root/app/huggingface_utils.py")
     image = image.add_local_file(modal_device_fix_path, "/root/app/modal_device_fix.py")
+    image = image.add_local_file(comprehensive_device_fix_path, "/root/app/comprehensive_device_fix.py")
 except Exception as e:
     print(f"Warning: Could not add core files to image: {e}")
     print("Core files will need to be available at runtime")
@@ -355,6 +357,9 @@ def train_olmo_model_impl(
     
     # Apply Modal-specific device placement fixes
     sys.path.append("/root/app")  # Ensure we can import modal_device_fix
+    
+    # Set Modal environment variable for device fix detection
+    os.environ["MODAL_ENVIRONMENT"] = "true"
     
     # Force single GPU mode for Modal to avoid device placement issues
     print("Configuring Modal for single GPU training to avoid device placement issues...")
