@@ -42,6 +42,23 @@ except ImportError:
     )
     from data_utils import create_data_module
 
+# Import comprehensive device fix
+try:
+    from ..comprehensive_device_fix import (
+        ComprehensiveDeviceManager,
+        apply_comprehensive_device_fix
+    )
+except ImportError:
+    try:
+        from comprehensive_device_fix import (
+            ComprehensiveDeviceManager,
+            apply_comprehensive_device_fix
+        )
+    except ImportError:
+        logger.warning("Comprehensive device fix not available - using fallback device handling")
+        ComprehensiveDeviceManager = None
+        apply_comprehensive_device_fix = None
+
 # Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -122,6 +139,19 @@ def train(
 ):
     """Main training function."""
     
+    # Apply comprehensive device fix at the start of training
+    device_manager = None
+    if apply_comprehensive_device_fix is not None:
+        logger.info("Applying comprehensive device placement fix...")
+        device_manager = apply_comprehensive_device_fix()
+        
+        # For Modal environments, force single GPU mode to prevent device mismatch
+        if os.environ.get("MODAL_ENVIRONMENT") == "true":
+            logger.info("Modal environment detected - disabling DeepSpeed to prevent device issues")
+            use_deepspeed = False
+    else:
+        logger.warning("Comprehensive device fix not available - proceeding with standard training")
+    
     # Set seed for reproducibility
     set_seed(seed)
     logger.info(f"Set random seed to {seed}")
@@ -178,23 +208,28 @@ def train(
     # Initialize trainer
     logger.info("Initializing trainer...")
     
-    # Handle device placement based on training configuration
-    if use_deepspeed:
-        # For DeepSpeed, ensure model is on CPU before trainer initialization
-        # DeepSpeed will handle moving it to GPU
-        if torch.cuda.is_available():
-            logger.info("Ensuring model is on CPU for DeepSpeed initialization...")
-            model = model.cpu()
+    # Apply final device preparation with comprehensive device manager
+    if device_manager is not None:
+        logger.info("Applying final device preparation before training...")
+        model = device_manager.prepare_for_training(model, tokenizer)
     else:
-        # For non-DeepSpeed training, ensure model is on GPU
-        if torch.cuda.is_available():
-            logger.info("Moving model to GPU for standard training...")
-            model = model.cuda()
-            # Verify all parameters are on GPU
-            for name, param in model.named_parameters():
-                if param.device.type != 'cuda':
-                    logger.warning(f"Parameter {name} is on {param.device}, moving to GPU")
-                    param.data = param.data.cuda()
+        # Handle device placement based on training configuration (fallback)
+        if use_deepspeed:
+            # For DeepSpeed, ensure model is on CPU before trainer initialization
+            # DeepSpeed will handle moving it to GPU
+            if torch.cuda.is_available():
+                logger.info("Ensuring model is on CPU for DeepSpeed initialization...")
+                model = model.cpu()
+        else:
+            # For non-DeepSpeed training, ensure model is on GPU
+            if torch.cuda.is_available():
+                logger.info("Moving model to GPU for standard training...")
+                model = model.cuda()
+                # Verify all parameters are on GPU
+                for name, param in model.named_parameters():
+                    if param.device.type != 'cuda':
+                        logger.warning(f"Parameter {name} is on {param.device}, moving to GPU")
+                        param.data = param.data.cuda()
     
     trainer = Trainer(
         model=model,

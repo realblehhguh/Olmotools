@@ -25,6 +25,29 @@ except ImportError:
     except ImportError:
         push_model_to_huggingface = None
 
+# Import comprehensive device fix
+try:
+    from ..comprehensive_device_fix import (
+        ComprehensiveDeviceManager,
+        apply_comprehensive_device_fix,
+        create_device_safe_model_loader,
+        create_device_safe_lora_wrapper
+    )
+except ImportError:
+    try:
+        from comprehensive_device_fix import (
+            ComprehensiveDeviceManager,
+            apply_comprehensive_device_fix,
+            create_device_safe_model_loader,
+            create_device_safe_lora_wrapper
+        )
+    except ImportError:
+        logger.warning("Comprehensive device fix not available - using fallback device handling")
+        ComprehensiveDeviceManager = None
+        apply_comprehensive_device_fix = None
+        create_device_safe_model_loader = None
+        create_device_safe_lora_wrapper = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -58,6 +81,16 @@ def load_olmo_model_and_tokenizer(
     
     logger.info(f"Loading model: {model_name}")
     
+    # Initialize comprehensive device manager if available
+    device_manager = None
+    if ComprehensiveDeviceManager is not None:
+        logger.info("Using comprehensive device placement fix")
+        device_manager = ComprehensiveDeviceManager()
+        device_manager.setup_environment()
+        device_manager.apply_modal_specific_fixes()
+    else:
+        logger.warning("Comprehensive device fix not available - using fallback")
+    
     # Check for distributed training environment
     is_distributed = (
         use_deepspeed or 
@@ -65,6 +98,13 @@ def load_olmo_model_and_tokenizer(
         os.environ.get("LOCAL_RANK") is not None or
         os.environ.get("RANK") is not None
     )
+    
+    # For Modal environments, force single GPU mode to prevent device mismatch
+    if os.environ.get("MODAL_ENVIRONMENT") == "true" or device_manager is not None:
+        logger.info("Modal environment detected - forcing single GPU mode")
+        is_distributed = False
+        use_deepspeed = False
+        device_map = None
     
     if is_distributed:
         logger.info("Distributed training detected - disabling device_map to avoid conflicts")
@@ -107,7 +147,7 @@ def load_olmo_model_and_tokenizer(
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # Load model with retry logic
+    # Load model with comprehensive device fix if available
     logger.info("Loading model...")
     model_kwargs = {
         "pretrained_model_name_or_path": model_name,
@@ -115,56 +155,74 @@ def load_olmo_model_and_tokenizer(
         "torch_dtype": torch_dtype,
     }
     
-    # Only add device_map if not using distributed training
-    if device_map is not None:
+    # Disable device_map for Modal environments to prevent device mismatch
+    if device_map is not None and not (os.environ.get("MODAL_ENVIRONMENT") == "true" or device_manager is not None):
         model_kwargs["device_map"] = device_map
+    else:
+        logger.info("Disabling device_map for consistent device placement")
     
     if bnb_config:
         model_kwargs["quantization_config"] = bnb_config
     
-    model = retry_on_network_error(
-        lambda: AutoModelForCausalLM.from_pretrained(**model_kwargs),
-        max_retries=3,
-        delay=10
-    )
-    
-    # Handle device placement when device_map is disabled for distributed training
-    if is_distributed and device_map is None:
+    # Use device-safe model loading if available
+    if device_manager is not None:
+        model = device_manager.wrap_model_loading(
+            lambda: retry_on_network_error(
+                lambda: AutoModelForCausalLM.from_pretrained(**model_kwargs),
+                max_retries=3,
+                delay=10
+            )
+        )
+    else:
+        # Fallback to standard loading
+        model = retry_on_network_error(
+            lambda: AutoModelForCausalLM.from_pretrained(**model_kwargs),
+            max_retries=3,
+            delay=10
+        )
+        
+        # Apply fallback device placement
         if torch.cuda.is_available():
-            # For distributed training, let the training framework handle device placement
-            # Don't move to GPU here as DeepSpeed will handle it
-            logger.info("Device placement will be handled by distributed training framework")
-            
-            # However, ensure all model parameters are on the same device (CPU)
-            # This prevents mixed device placement issues
-            logger.info("Ensuring all model parameters are on CPU for consistent device placement")
-            model = model.cpu()
-        else:
-            logger.warning("CUDA not available - model will remain on CPU")
-    elif device_map is None and torch.cuda.is_available():
-        # For single GPU training without device_map, ensure model is on the correct device
-        logger.info("Single GPU training detected - ensuring model is on cuda:0")
-        model = model.cuda(0)
-        # Ensure all parameters are on the same device
-        for name, param in model.named_parameters():
-            if param.device.type != 'cuda' or param.device.index != 0:
-                param.data = param.data.cuda(0)
+            logger.info("Applying fallback device placement to cuda:0")
+            model = model.cuda(0)
+            # Ensure all parameters are on the same device
+            for name, param in model.named_parameters():
+                if param.device.type != 'cuda' or param.device.index != 0:
+                    param.data = param.data.cuda(0)
     
     # Prepare model for training if using quantization
     if use_4bit or load_in_8bit:
         model = prepare_model_for_kbit_training(model)
     
-    # Apply LoRA if requested
+    # Apply LoRA if requested with device-safe wrapper
     if use_lora:
         logger.info("Applying LoRA configuration...")
         lora_config = create_lora_config()
-        model = get_peft_model(model, lora_config)
+        
+        if device_manager is not None:
+            # Use device-safe LoRA application
+            model = device_manager.wrap_lora_application(get_peft_model, model, lora_config)
+        else:
+            # Fallback LoRA application
+            model = get_peft_model(model, lora_config)
+            # Ensure LoRA adapters are on correct device
+            if torch.cuda.is_available():
+                model = model.cuda(0)
+                # Check for LoRA-specific device issues
+                for name, param in model.named_parameters():
+                    if param.device.type != 'cuda' or param.device.index != 0:
+                        param.data = param.data.cuda(0)
+        
         model.print_trainable_parameters()
         # Enable gradient checkpointing after LoRA
         model.gradient_checkpointing_enable()
     else:
         # Only enable gradient checkpointing for non-LoRA models
         model.gradient_checkpointing_enable()
+    
+    # Final device consistency check
+    if device_manager is not None:
+        model = device_manager.ensure_model_device_consistency(model, "final_loaded_model")
     
     return model, tokenizer
 
