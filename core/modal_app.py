@@ -259,128 +259,117 @@ def get_gpu_recommendations(use_case: str = "training") -> dict:
     return recommendations.get(use_case, recommendations["training"])
 
 
-def create_training_function(gpu_type: str = "A100", gpu_count: int = 2):
-    """
-    Create a training function with specific GPU configuration.
+# Global Modal function for training - must be at module level
+@app.function(
+    image=image,
+    gpu="A100:2",  # Default GPU config, will be overridden dynamically
+    volumes={
+        MODEL_DIR: model_volume,
+        DATASET_DIR: dataset_volume,
+    },
+    timeout=86400,  # 24 hours timeout
+    memory=32768,  # 32GB RAM
+    secrets=[
+        modal.Secret.from_name("huggingface-token"),  # For accessing gated models
+        modal.Secret.from_name("wandb-secret"),  # For W&B logging
+    ],
+)
+def train_olmo_model_impl(
+    model_name: str = "allenai/OLMo-2-1124-7B",
+    num_epochs: int = 3,
+    batch_size: int = 4,
+    learning_rate: float = 2e-5,
+    max_length: int = 2048,
+    use_lora: bool = True,
+    use_4bit: bool = False,
+    train_sample_size: int = None,
+    run_name: str = None,
+    gpu_type: str = "A100",
+    gpu_count: int = 2,
+):
+    """Train OLMo model on Modal with DeepSpeed."""
     
-    Args:
-        gpu_type: Type of GPU to use
-        gpu_count: Number of GPUs to use
+    import sys
+    import torch
+    from huggingface_hub import login
     
-    Returns:
-        Modal function configured with the specified GPU settings
-    """
+    # Set CUDA_HOME for DeepSpeed
+    os.environ["CUDA_HOME"] = "/usr/local/cuda"
     
-    @app.function(
-        image=image,
-        gpu=get_gpu_config(gpu_type, gpu_count),
-        volumes={
-            MODEL_DIR: model_volume,
-            DATASET_DIR: dataset_volume,
-        },
-        timeout=86400,  # 24 hours timeout
-        memory=32768,  # 32GB RAM
-        secrets=[
-            modal.Secret.from_name("huggingface-token"),  # For accessing gated models
-            modal.Secret.from_name("wandb-secret"),  # For W&B logging
-        ],
+    # Add current directory to path
+    sys.path.append("/root/app")
+    
+    # Import our training modules
+    from train import train
+    
+    # Login to HuggingFace if token is available
+    if "HUGGINGFACE_TOKEN" in os.environ:
+        login(token=os.environ["HUGGINGFACE_TOKEN"])
+        print("Logged in to HuggingFace Hub")
+    
+    # Set up output directory with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = f"{OUTPUT_DIR}/run_{timestamp}"
+    if run_name:
+        output_dir = f"{OUTPUT_DIR}/{run_name}_{timestamp}"
+    
+    # Create output directory
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Log GPU information
+    print(f"GPU Configuration: {gpu_type}:{gpu_count}")
+    if torch.cuda.is_available():
+        print(f"GPU Available: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        print(f"Number of GPUs: {torch.cuda.device_count()}")
+    
+    # Choose appropriate DeepSpeed config based on GPU count
+    if gpu_count == 1:
+        deepspeed_config_path = "/root/app/configs/deepspeed_config_single_gpu.json"
+    else:
+        deepspeed_config_path = "/root/app/configs/deepspeed_config.json"
+    
+    # Run training
+    print(f"Starting training with the following configuration:")
+    print(f"  Model: {model_name}")
+    print(f"  GPU Type: {gpu_type}")
+    print(f"  GPU Count: {gpu_count}")
+    print(f"  Epochs: {num_epochs}")
+    print(f"  Batch Size: {batch_size}")
+    print(f"  Learning Rate: {learning_rate}")
+    print(f"  Max Length: {max_length}")
+    print(f"  Use LoRA: {use_lora}")
+    print(f"  Use 4-bit: {use_4bit}")
+    print(f"  DeepSpeed Config: {deepspeed_config_path}")
+    print(f"  Output Directory: {output_dir}")
+    
+    # Call the training function
+    trainer, model, tokenizer = train(
+        model_name=model_name,
+        output_dir=output_dir,
+        num_train_epochs=num_epochs,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+        gradient_accumulation_steps=4,
+        learning_rate=learning_rate,
+        warmup_steps=500,
+        max_length=max_length,
+        use_lora=use_lora,
+        use_4bit=use_4bit,
+        use_deepspeed=True,
+        deepspeed_config_path=deepspeed_config_path,
+        train_sample_size=train_sample_size,
+        val_sample_size=500,
+        seed=42,
+        run_name=run_name,
+        wandb_project="olmo-finetune-modal"
     )
-    def train_olmo_model_impl(
-        model_name: str = "allenai/OLMo-2-1124-7B",
-        num_epochs: int = 3,
-        batch_size: int = 4,
-        learning_rate: float = 2e-5,
-        max_length: int = 2048,
-        use_lora: bool = True,
-        use_4bit: bool = False,
-        train_sample_size: int = None,
-        run_name: str = None,
-    ):
-        """Train OLMo model on Modal with DeepSpeed."""
-        
-        import sys
-        import torch
-        from huggingface_hub import login
-        
-        # Set CUDA_HOME for DeepSpeed
-        os.environ["CUDA_HOME"] = "/usr/local/cuda"
-        
-        # Add current directory to path
-        sys.path.append("/root/app")
-        
-        # Import our training modules
-        from train import train
-        
-        # Login to HuggingFace if token is available
-        if "HUGGINGFACE_TOKEN" in os.environ:
-            login(token=os.environ["HUGGINGFACE_TOKEN"])
-            print("Logged in to HuggingFace Hub")
-        
-        # Set up output directory with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = f"{OUTPUT_DIR}/run_{timestamp}"
-        if run_name:
-            output_dir = f"{OUTPUT_DIR}/{run_name}_{timestamp}"
-        
-        # Create output directory
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        # Log GPU information
-        print(f"GPU Configuration: {gpu_type}:{gpu_count}")
-        if torch.cuda.is_available():
-            print(f"GPU Available: {torch.cuda.get_device_name(0)}")
-            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-            print(f"Number of GPUs: {torch.cuda.device_count()}")
-        
-        # Choose appropriate DeepSpeed config based on GPU count
-        if gpu_count == 1:
-            deepspeed_config_path = "/root/app/configs/deepspeed_config_single_gpu.json"
-        else:
-            deepspeed_config_path = "/root/app/configs/deepspeed_config.json"
-        
-        # Run training
-        print(f"Starting training with the following configuration:")
-        print(f"  Model: {model_name}")
-        print(f"  GPU Type: {gpu_type}")
-        print(f"  GPU Count: {gpu_count}")
-        print(f"  Epochs: {num_epochs}")
-        print(f"  Batch Size: {batch_size}")
-        print(f"  Learning Rate: {learning_rate}")
-        print(f"  Max Length: {max_length}")
-        print(f"  Use LoRA: {use_lora}")
-        print(f"  Use 4-bit: {use_4bit}")
-        print(f"  DeepSpeed Config: {deepspeed_config_path}")
-        print(f"  Output Directory: {output_dir}")
-        
-        # Call the training function
-        trainer, model, tokenizer = train(
-            model_name=model_name,
-            output_dir=output_dir,
-            num_train_epochs=num_epochs,
-            per_device_train_batch_size=batch_size,
-            per_device_eval_batch_size=batch_size,
-            gradient_accumulation_steps=4,
-            learning_rate=learning_rate,
-            warmup_steps=500,
-            max_length=max_length,
-            use_lora=use_lora,
-            use_4bit=use_4bit,
-            use_deepspeed=True,
-            deepspeed_config_path=deepspeed_config_path,
-            train_sample_size=train_sample_size,
-            val_sample_size=500,
-            seed=42,
-            run_name=run_name,
-            wandb_project="olmo-finetune-modal"
-        )
-        
-        # Commit volumes to persist checkpoints
-        model_volume.commit()
-        
-        print(f"Training completed! Model saved to: {output_dir}")
-        return output_dir
     
-    return train_olmo_model_impl
+    # Commit volumes to persist checkpoints
+    model_volume.commit()
+    
+    print(f"Training completed! Model saved to: {output_dir}")
+    return output_dir
 
 
 def train_olmo_model(
@@ -399,15 +388,15 @@ def train_olmo_model(
     """
     Train OLMo model on Modal with configurable GPU settings.
     
-    This function creates a Modal function with the specified GPU configuration
-    and executes the training job.
+    This function executes the training job using the global Modal function.
     """
     # Validate GPU configuration
     gpu_config = get_gpu_config(gpu_type, gpu_count)
-    print(f"Creating training function with GPU config: {gpu_config}")
+    print(f"Using GPU config: {gpu_config}")
     
-    # Create the training function with the specified GPU configuration
-    training_func = create_training_function(gpu_type, gpu_count)
+    # Create a new function with the specific GPU configuration
+    # We need to use Modal's with_options to override the GPU config
+    training_func = train_olmo_model_impl.with_options(gpu=gpu_config)
     
     # Execute the training
     return training_func.remote(
@@ -420,6 +409,8 @@ def train_olmo_model(
         use_4bit=use_4bit,
         train_sample_size=train_sample_size,
         run_name=run_name,
+        gpu_type=gpu_type,
+        gpu_count=gpu_count,
     )
 
 
