@@ -159,8 +159,6 @@ def run_deployment(deployment_id: str, config: Dict):
                 "Please ensure the deployment module is available in the Python path. "
                 f"Tried paths: {possible_roots}"
             )
-
-[LMArena Bridge Error]: Browser disconnected during operation
         
         # Run deployment
         result = deploy_training(
