@@ -389,17 +389,16 @@ def train_olmo_model(
     Train OLMo model on Modal with configurable GPU settings.
     
     This function executes the training job using the global Modal function.
+    Note: GPU configuration is passed as parameters to the function since
+    Modal functions must be defined at global scope with fixed configurations.
     """
     # Validate GPU configuration
     gpu_config = get_gpu_config(gpu_type, gpu_count)
     print(f"Using GPU config: {gpu_config}")
     
-    # Create a new function with the specific GPU configuration
-    # We need to use Modal's with_options to override the GPU config
-    training_func = train_olmo_model_impl.with_options(gpu=gpu_config)
-    
-    # Execute the training
-    return training_func.remote(
+    # Execute the training directly - the GPU config is passed as parameters
+    # The actual GPU allocation is handled by the function's decorator
+    return train_olmo_model_impl.remote(
         model_name=model_name,
         num_epochs=num_epochs,
         batch_size=batch_size,
