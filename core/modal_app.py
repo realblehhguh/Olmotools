@@ -40,29 +40,57 @@ image = (
         "HF_HUB_ENABLE_HF_TRANSFER": "0",
         "HF_HUB_DISABLE_PROGRESS_BARS": "0"
     })
-    # Add local files last to avoid rebuilding on every change
-    .add_local_file("train.py", "/root/app/train.py")
-    .add_local_file("data_utils.py", "/root/app/data_utils.py")
-    .add_local_file("model_utils.py", "/root/app/model_utils.py")
 )
 
-# Add config files with proper path resolution
-def get_config_path(filename):
-    """Get the absolute path to a config file, handling different deployment environments."""
+# Helper function to find files in different deployment environments
+def get_file_path(filename, subdirs=None):
+    """Get the absolute path to a file, handling different deployment environments."""
+    if subdirs is None:
+        subdirs = ["", "core", "src"]
+    
     # Try different possible locations
-    possible_paths = [
-        f"../configs/{filename}",  # Local development
-        f"configs/{filename}",     # When running from project root
-        f"./configs/{filename}",   # Current directory
-        f"/opt/render/project/configs/{filename}",  # Render deployment
-    ]
+    possible_paths = []
+    
+    for subdir in subdirs:
+        if subdir:
+            possible_paths.extend([
+                f"{subdir}/{filename}",           # Local development
+                f"./{subdir}/{filename}",         # Current directory
+                f"../{subdir}/{filename}",        # Parent directory
+                f"/opt/render/project/{subdir}/{filename}",  # Render deployment
+                f"/opt/render/project/src/{filename}",       # Render src directory
+            ])
+        else:
+            possible_paths.extend([
+                filename,                         # Current directory
+                f"./{filename}",                  # Current directory
+                f"../{filename}",                 # Parent directory
+                f"/opt/render/project/{filename}", # Render deployment
+            ])
     
     for path in possible_paths:
         if os.path.exists(path):
             return path
     
     # If none found, return the most likely path and let it fail with a clear error
-    return f"configs/{filename}"
+    return filename
+
+def get_config_path(filename):
+    """Get the absolute path to a config file, handling different deployment environments."""
+    return get_file_path(filename, ["configs", "../configs", "./configs"])
+
+# Add local files with proper path resolution
+try:
+    train_py_path = get_file_path("train.py", ["core", "src", ""])
+    data_utils_path = get_file_path("data_utils.py", ["core", "src", ""])
+    model_utils_path = get_file_path("model_utils.py", ["core", "src", ""])
+    
+    image = image.add_local_file(train_py_path, "/root/app/train.py")
+    image = image.add_local_file(data_utils_path, "/root/app/data_utils.py")
+    image = image.add_local_file(model_utils_path, "/root/app/model_utils.py")
+except Exception as e:
+    print(f"Warning: Could not add core files to image: {e}")
+    print("Core files will need to be available at runtime")
 
 # Add config files to image
 try:
