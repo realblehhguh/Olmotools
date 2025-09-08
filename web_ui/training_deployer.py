@@ -109,11 +109,58 @@ def run_deployment(deployment_id: str, config: Dict):
         active_deployments[deployment_id]['status'] = 'running'
         active_deployments[deployment_id]['start_time'] = datetime.now().isoformat()
         
-        # Import deployment function
-        # Add the parent directory to sys.path to access the deployment module
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        sys.path.insert(0, parent_dir)
-        from deployment.deploy_modal import deploy_training
+        # Import deployment function with robust path resolution
+        # Try multiple approaches to find and import the deployment module
+        deployment_imported = False
+        
+        # Approach 1: Try direct import first (works if already in correct path)
+        try:
+            from deployment.deploy_modal import deploy_training
+            deployment_imported = True
+        except ImportError:
+            pass
+        
+        # Approach 2: Add parent directory to sys.path
+        if not deployment_imported:
+            try:
+                parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if parent_dir not in sys.path:
+                    sys.path.insert(0, parent_dir)
+                from deployment.deploy_modal import deploy_training
+                deployment_imported = True
+            except ImportError:
+                pass
+        
+        # Approach 3: Try different possible project root locations
+        if not deployment_imported:
+            possible_roots = [
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # ../
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),  # ../../
+                "/opt/render/project",  # Render deployment
+                os.path.join(os.path.dirname(__file__), ".."),  # Relative parent
+                os.getcwd(),  # Current working directory
+            ]
+            
+            for root_dir in possible_roots:
+                if os.path.exists(os.path.join(root_dir, "deployment", "deploy_modal.py")):
+                    if root_dir not in sys.path:
+                        sys.path.insert(0, root_dir)
+                    try:
+                        from deployment.deploy_modal import deploy_training
+                        deployment_imported = True
+                        break
+                    except ImportError:
+                        continue
+        
+        # If still not imported, raise a clear error
+        if not deployment_imported:
+            raise ImportError(
+                "Could not import deployment.deploy_modal. "
+                "Please ensure the deployment module is available in the Python path. "
+                f"Tried paths: {possible_roots}"
+            )
+
+[LMArena Bridge Error]: Browser disconnected during operation
         
         # Run deployment
         result = deploy_training(
