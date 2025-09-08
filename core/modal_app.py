@@ -71,7 +71,7 @@ except Exception as e:
         "flask-cors>=4.0.0",
     )
 
-image = image
+image = (image
     .run_commands(
         # Set CUDA environment variables for DeepSpeed
         "export CUDA_HOME=/usr/local/cuda",
