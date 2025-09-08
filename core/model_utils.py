@@ -124,6 +124,11 @@ def load_olmo_model_and_tokenizer(
             # For distributed training, let the training framework handle device placement
             # Don't move to GPU here as DeepSpeed will handle it
             logger.info("Device placement will be handled by distributed training framework")
+            
+            # However, ensure all model parameters are on the same device (CPU)
+            # This prevents mixed device placement issues
+            logger.info("Ensuring all model parameters are on CPU for consistent device placement")
+            model = model.cpu()
         else:
             logger.warning("CUDA not available - model will remain on CPU")
     

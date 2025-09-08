@@ -134,10 +134,12 @@ try:
     train_py_path = get_file_path("train.py", ["core", "src", ""])
     data_utils_path = get_file_path("data_utils.py", ["core", "src", ""])
     model_utils_path = get_file_path("model_utils.py", ["core", "src", ""])
+    modal_device_fix_path = get_file_path("modal_device_fix.py", ["", "src", "."])
     
     image = image.add_local_file(train_py_path, "/root/app/train.py")
     image = image.add_local_file(data_utils_path, "/root/app/data_utils.py")
     image = image.add_local_file(model_utils_path, "/root/app/model_utils.py")
+    image = image.add_local_file(modal_device_fix_path, "/root/app/modal_device_fix.py")
 except Exception as e:
     print(f"Warning: Could not add core files to image: {e}")
     print("Core files will need to be available at runtime")
@@ -342,6 +344,25 @@ def train_olmo_model_impl(
     print(f"  Use 4-bit: {use_4bit}")
     print(f"  DeepSpeed Config: {deepspeed_config_path}")
     print(f"  Output Directory: {output_dir}")
+    
+    # Apply Modal-specific device placement fixes
+    sys.path.append("/root/app")  # Ensure we can import modal_device_fix
+    try:
+        from modal_device_fix import setup_modal_environment_for_training, apply_modal_device_fixes
+        
+        # Setup Modal environment for proper device placement
+        setup_modal_environment_for_training(gpu_count=gpu_count, force_cpu_start=True)
+        apply_modal_device_fixes()
+        
+        print("Applied Modal-specific device placement fixes")
+    except ImportError as e:
+        print(f"Warning: Could not import modal_device_fix: {e}")
+        # Fallback to basic environment setup
+        if gpu_count > 1:
+            os.environ["WORLD_SIZE"] = str(gpu_count)
+            os.environ["LOCAL_RANK"] = "0"
+            os.environ["RANK"] = "0"
+            print(f"Set distributed environment variables for {gpu_count} GPUs")
     
     # Call the training function
     trainer, model, tokenizer = train(
