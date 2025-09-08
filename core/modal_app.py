@@ -44,9 +44,36 @@ image = (
     .add_local_file("train.py", "/root/app/train.py")
     .add_local_file("data_utils.py", "/root/app/data_utils.py")
     .add_local_file("model_utils.py", "/root/app/model_utils.py")
-    .add_local_file("../configs/deepspeed_config.json", "/root/app/configs/deepspeed_config.json")
-    .add_local_file("../configs/deepspeed_config_single_gpu.json", "/root/app/configs/deepspeed_config_single_gpu.json")
 )
+
+# Add config files with proper path resolution
+def get_config_path(filename):
+    """Get the absolute path to a config file, handling different deployment environments."""
+    # Try different possible locations
+    possible_paths = [
+        f"../configs/{filename}",  # Local development
+        f"configs/{filename}",     # When running from project root
+        f"./configs/{filename}",   # Current directory
+        f"/opt/render/project/configs/{filename}",  # Render deployment
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # If none found, return the most likely path and let it fail with a clear error
+    return f"configs/{filename}"
+
+# Add config files to image
+try:
+    deepspeed_config_path = get_config_path("deepspeed_config.json")
+    deepspeed_single_gpu_path = get_config_path("deepspeed_config_single_gpu.json")
+    
+    image = image.add_local_file(deepspeed_config_path, "/root/app/configs/deepspeed_config.json")
+    image = image.add_local_file(deepspeed_single_gpu_path, "/root/app/configs/deepspeed_config_single_gpu.json")
+except Exception as e:
+    print(f"Warning: Could not add config files to image: {e}")
+    print("Config files will need to be available at runtime")
 
 # Create volumes for model storage and checkpoints
 model_volume = modal.Volume.from_name("olmo-model-checkpoints", create_if_missing=True)
