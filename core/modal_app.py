@@ -367,6 +367,9 @@ def train_olmo_model_impl(
             os.environ.pop(var, None)
         print("Cleared distributed environment variables for single GPU training")
     
+    # For Modal single GPU mode, disable DeepSpeed to avoid device placement issues
+    use_deepspeed_for_training = False  # Disable DeepSpeed for Modal to simplify device management
+    
     # Call the training function
     trainer, model, tokenizer = train(
         model_name=model_name,
@@ -380,8 +383,8 @@ def train_olmo_model_impl(
         max_length=max_length,
         use_lora=use_lora,
         use_4bit=use_4bit,
-        use_deepspeed=True,
-        deepspeed_config_path=deepspeed_config_path,
+        use_deepspeed=use_deepspeed_for_training,
+        deepspeed_config_path=deepspeed_config_path if use_deepspeed_for_training else None,
         train_sample_size=train_sample_size,
         val_sample_size=500,
         seed=42,
